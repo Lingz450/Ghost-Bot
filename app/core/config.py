@@ -67,6 +67,11 @@ class Settings(BaseSettings):
     analysis_include_derivatives_default: bool = Field(default=False, alias="ANALYSIS_INCLUDE_DERIVATIVES_DEFAULT")
     analysis_include_news_default: bool = Field(default=False, alias="ANALYSIS_INCLUDE_NEWS_DEFAULT")
     analysis_request_timeout_sec: float = Field(default=8.0, alias="ANALYSIS_REQUEST_TIMEOUT_SEC")
+    rsi_scan_universe_size: int = Field(default=500, alias="RSI_SCAN_UNIVERSE_SIZE")
+    rsi_scan_scan_timeframes: str = Field(default="15m,1h,4h,1d", alias="RSI_SCAN_SCAN_TIMEFRAMES")
+    rsi_scan_concurrency: int = Field(default=12, alias="RSI_SCAN_CONCURRENCY")
+    rsi_scan_freshness_minutes: int = Field(default=45, alias="RSI_SCAN_FRESHNESS_MINUTES")
+    rsi_scan_live_fallback_universe: int = Field(default=120, alias="RSI_SCAN_LIVE_FALLBACK_UNIVERSE")
 
     default_timeframe: str = "1h"
     include_btc_eth_watchlist: bool = True
@@ -99,6 +104,14 @@ class Settings(BaseSettings):
             if tf:
                 out.append(tf)
         return out or ["1h"]
+
+    def rsi_scan_timeframes_list(self) -> List[str]:
+        out: List[str] = []
+        for item in self.rsi_scan_scan_timeframes.split(","):
+            tf = item.strip()
+            if tf:
+                out.append(tf)
+        return out or ["15m", "1h", "4h", "1d"]
 
 
 @lru_cache(maxsize=1)

@@ -77,7 +77,18 @@ def build_hub(settings: Settings, bot: Bot, cache: RedisCache, http: ResilientHT
     tron_adapter = TronAdapter(http=http, api_url=settings.tron_api_url, api_key=settings.trongrid_api_key)
 
     news_service = NewsService(news_adapter, llm_client=llm_client)
-    rsi_scanner_service = RSIScannerService(http=http, cache=cache, ohlcv_adapter=ohlcv_adapter, binance_base=settings.binance_base_url)
+    rsi_scanner_service = RSIScannerService(
+        http=http,
+        cache=cache,
+        ohlcv_adapter=ohlcv_adapter,
+        binance_base=settings.binance_base_url,
+        db_factory=AsyncSessionLocal,
+        universe_size=settings.rsi_scan_universe_size,
+        scan_timeframes=settings.rsi_scan_timeframes_list(),
+        concurrency=settings.rsi_scan_concurrency,
+        freshness_minutes=settings.rsi_scan_freshness_minutes,
+        live_fallback_universe=settings.rsi_scan_live_fallback_universe,
+    )
     discovery_service = DiscoveryService(
         http=http,
         cache=cache,
@@ -291,6 +302,16 @@ def create_app() -> FastAPI:
 
         await app.state.hub.news_service.get_daily_brief(limit=10)
         return {"ok": True, "task": "news", "ts": datetime.now(timezone.utc).isoformat()}
+
+    @app.api_route("/tasks/rsi/refresh", methods=["GET", "POST"])
+    async def task_rsi_refresh(req: Request) -> dict:
+        if not _cron_authorized(req):
+            raise HTTPException(status_code=401, detail="Unauthorized")
+
+        force = str(req.query_params.get("force", "")).lower() in {"1", "true", "yes"}
+        await app.state.hub.rsi_scanner_service.refresh_universe(app.state.settings.rsi_scan_universe_size)
+        payload = await app.state.hub.rsi_scanner_service.refresh_indicators(force=force)
+        return {"ok": True, "task": "rsi_refresh", "force": force, **payload}
 
     return app
 

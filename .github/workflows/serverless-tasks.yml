@@ -28,6 +28,12 @@ jobs:
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
             "${{ secrets.VERCEL_BASE_URL }}/tasks/giveaways/run"
 
+      - name: Refresh RSI market scan
+        run: |
+          curl -fsS -X POST \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            "${{ secrets.VERCEL_BASE_URL }}/tasks/rsi/refresh"
+
       - name: Run news warm task every 15 minutes
         run: |
           MINUTE=$(date -u +%M)
@@ -39,4 +45,3 @@ jobs:
           else
             echo "Skipping news warm this run (minute=$MINUTE)"
           fi
-

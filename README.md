@@ -107,6 +107,7 @@ alembic upgrade head
 - Workflow `.github/workflows/serverless-tasks.yml` runs every 5 minutes and calls:
   - `/tasks/alerts/run`
   - `/tasks/giveaways/run`
+  - `/tasks/rsi/refresh`
   - `/tasks/news/warm` (every 15 minutes)
 
 Notes:
@@ -150,6 +151,11 @@ Primary runtime:
 - `OPENAI_MAX_OUTPUT_TOKENS` (default `350`)
 - `OPENAI_TEMPERATURE` (default `0.7`)
 - `OPENAI_ROUTER_MIN_CONFIDENCE` (default `0.6`, LLM intent router execution threshold)
+- `RSI_SCAN_UNIVERSE_SIZE` (default `500`)
+- `RSI_SCAN_SCAN_TIMEFRAMES` (default `15m,1h,4h,1d`)
+- `RSI_SCAN_CONCURRENCY` (default `12`)
+- `RSI_SCAN_FRESHNESS_MINUTES` (default `45`)
+- `RSI_SCAN_LIVE_FALLBACK_UNIVERSE` (default `120`)
 
 Data source/adapters:
 
@@ -195,6 +201,7 @@ Behavior/test mode:
   - `news:crypto`
   - `news:openai`
   - `funding:<symbol>`
+  - `rsi:universe:<N>`
 - Alert anti-spam:
   - one-shot status transition to `triggered`
   - minute-bucket dedupe key

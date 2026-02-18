@@ -124,3 +124,32 @@ class GiveawayWinner(Base):
     chat_id: Mapped[int] = mapped_column(BigInteger, index=True)
     user_chat_id: Mapped[int] = mapped_column(BigInteger, index=True)
     won_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class UniverseSymbol(Base):
+    __tablename__ = "universe_symbols"
+    __table_args__ = (UniqueConstraint("symbol", "exchange", name="uq_universe_symbol_exchange"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(20), index=True)
+    exchange: Mapped[str] = mapped_column(String(20), default="binance", index=True)
+    rank: Mapped[int] = mapped_column(Integer, index=True)
+    quote_volume_24h: Mapped[float] = mapped_column(Float, default=0.0)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+
+class IndicatorSnapshot(Base):
+    __tablename__ = "indicator_snapshots"
+    __table_args__ = (UniqueConstraint("symbol", "timeframe", "exchange", name="uq_indicator_symbol_tf_exchange"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(20), index=True)
+    timeframe: Mapped[str] = mapped_column(String(10), index=True)
+    exchange: Mapped[str] = mapped_column(String(20), default="binance", index=True)
+    close_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    rsi14: Mapped[float | None] = mapped_column(Float, nullable=True, index=True)
+    ema20: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ema50: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ema100: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ema200: Mapped[float | None] = mapped_column(Float, nullable=True)
+    computed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
