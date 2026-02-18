@@ -204,6 +204,9 @@ def create_app() -> FastAPI:
     app = FastAPI(title="Ghost Alpha Bot", version="1.0.0", lifespan=lifespan)
 
     def _cron_authorized(req: Request) -> bool:
+        # Native Vercel cron invocations include this header.
+        if req.headers.get("x-vercel-cron"):
+            return True
         if not settings.cron_secret:
             return True
         auth = req.headers.get("authorization", "")

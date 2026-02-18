@@ -141,6 +141,7 @@ Primary runtime:
 - `TELEGRAM_AUTO_SET_WEBHOOK` (default `true`)
 - `SERVERLESS_MODE` (default `false`; set `true` on Vercel)
 - `CRON_SECRET` (optional but recommended for `/tasks/*`)
+  - Note: Vercel native cron calls are accepted via `x-vercel-cron` header automatically.
 - `OPENAI_API_KEY` (optional, enables freeform Q&A fallback)
 - `OPENAI_MODEL` (default `gpt-4.1-mini`)
 - `OPENAI_MAX_OUTPUT_TOKENS` (default `350`)
