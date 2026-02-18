@@ -519,7 +519,12 @@ async def watchlist_cmd(message: Message) -> None:
     hub = _require_hub()
     n_match = re.search(r"/watchlist\s+(\d+)", message.text or "")
     n = int(n_match.group(1)) if n_match else 5
-    payload = await hub.watchlist_service.build_watchlist(count=max(1, min(n, 20)))
+    direction = None
+    if re.search(r"\blong\b", message.text or "", re.IGNORECASE):
+        direction = "long"
+    elif re.search(r"\bshort\b", message.text or "", re.IGNORECASE):
+        direction = "short"
+    payload = await hub.watchlist_service.build_watchlist(count=max(1, min(n, 20)), direction=direction)
     await message.answer(watchlist_template(payload))
 
 
@@ -1140,7 +1145,10 @@ async def route_text(message: Message) -> None:
             return
 
         if parsed.intent == Intent.WATCHLIST:
-            payload = await hub.watchlist_service.build_watchlist(parsed.entities.get("count", 5))
+            payload = await hub.watchlist_service.build_watchlist(
+                count=parsed.entities.get("count", 5),
+                direction=parsed.entities.get("direction"),
+            )
             await message.answer(watchlist_template(payload))
             return
 

@@ -43,6 +43,7 @@ SMALLTALK_RE = re.compile(
     r"\b("
     r"how are you|how you doing|how are you doing|how are you doing today|"
     r"how's it going|hows it going|"
+    r"what are we doing today|what we doing today|"
     r"hi|hello|hey|yo|sup|gm|good morning|good afternoon|good evening|what's up|whats up"
     r")\b"
 )
@@ -117,6 +118,9 @@ COMMON_STOPWORDS = {
     "coin",
     "token",
     "price",
+    "to",
+    "right",
+    "now",
     "my",
     "alerts",
     "reset",
@@ -530,6 +534,18 @@ def parse_message(text: str) -> ParsedMessage:
 
     if "/cycle" in lower or "cycle check" in lower or "bull market top" in lower or "halving" in lower:
         return ParsedMessage(Intent.CYCLE)
+
+    direction_watch = re.search(
+        r"\b(?:coin|coins|which|what|best)\b.*\bto\s+(long|short)\b|\b(?:long|short)\s+(?:coin|coins)\b",
+        lower,
+    )
+    if direction_watch and not re.search(r"\b(entry|stop|sl|targets?|tp\d*|limit)\b", lower):
+        direction = "short" if "short" in direction_watch.group(0) else "long"
+        n_match = re.search(r"\b(\d{1,2})\b", lower)
+        singular_prompt = bool(re.search(r"\b(coin|which|what)\b", lower)) and "coins" not in lower
+        n_default = 1 if singular_prompt else 5
+        n = int(n_match.group(1)) if n_match else n_default
+        return ParsedMessage(Intent.WATCHLIST, {"count": max(1, min(n, 20)), "direction": direction})
 
     watch_match = re.search(r"(?:coins\s+to\s+watch|give me\s+\d+\s+coins\s+to\s+watch|/watchlist)\s*(\d+)?", lower)
     if watch_match or "coins to watch" in lower:
