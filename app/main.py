@@ -182,8 +182,15 @@ async def lifespan(app: FastAPI):
 
     if settings.telegram_use_webhook and settings.telegram_auto_set_webhook:
         webhook_url = settings.telegram_webhook_url.rstrip("/") + settings.telegram_webhook_path
-        await bot.set_webhook(webhook_url, secret_token=settings.telegram_webhook_secret or None)
-        logger.info("webhook_configured", extra={"event": "webhook", "url": webhook_url})
+        try:
+            await bot.set_webhook(webhook_url, secret_token=settings.telegram_webhook_secret or None)
+            logger.info("webhook_configured", extra={"event": "webhook", "url": webhook_url})
+        except Exception as exc:  # noqa: BLE001
+            # Do not crash the whole API on webhook registration failures.
+            logger.exception(
+                "webhook_configure_failed",
+                extra={"event": "webhook_error", "url": webhook_url, "error": str(exc)},
+            )
     elif not settings.telegram_use_webhook and not settings.serverless_mode:
         polling_task = asyncio.create_task(dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types()))
 
