@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+from app.adapters.market_router import MarketDataRouter
 from app.adapters.prices import PriceAdapter
 from app.core.cache import RedisCache
 from app.core.http import ResilientHTTPClient
@@ -12,12 +13,14 @@ class DiscoveryService:
         self,
         http: ResilientHTTPClient,
         cache: RedisCache,
+        market_router: MarketDataRouter,
         price_adapter: PriceAdapter,
         binance_base: str,
         coingecko_base: str,
     ) -> None:
         self.http = http
         self.cache = cache
+        self.market_router = market_router
         self.price_adapter = price_adapter
         self.binance_base = binance_base
         self.coingecko_base = coingecko_base
@@ -67,6 +70,7 @@ class DiscoveryService:
             tradable = symbol in bases
             price = None
             source = "coingecko_search"
+            resolved = await self.market_router.resolve_symbol_market(symbol, "spot")
             try:
                 price_payload = await self.price_adapter.get_price(symbol)
                 price = float(price_payload["price"])
@@ -78,7 +82,8 @@ class DiscoveryService:
                     "symbol": symbol,
                     "name": name,
                     "tradable_binance": tradable,
-                    "pair": f"{symbol}USDT" if tradable else None,
+                    "pair": (resolved.get("instrument_id") if resolved else (f"{symbol}USDT" if tradable else None)),
+                    "exchange": resolved.get("exchange") if resolved else ("binance" if tradable else None),
                     "price": round(price, 8) if price is not None else None,
                     "source": source,
                 }

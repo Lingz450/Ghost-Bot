@@ -37,6 +37,9 @@ class Alert(Base):
     cooldown_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     last_triggered_price: Mapped[float | None] = mapped_column(Float, nullable=True)
     source: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    source_exchange: Mapped[str | None] = mapped_column(String(20), nullable=True, index=True)
+    instrument_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    market_kind: Mapped[str | None] = mapped_column(String(10), nullable=True, default="spot")
 
     user: Mapped[User] = relationship(back_populates="alerts")
 

@@ -5,9 +5,14 @@ on:
     - cron: "*/5 * * * *"
   workflow_dispatch:
 
+concurrency:
+  group: serverless-tasks
+  cancel-in-progress: true
+
 jobs:
   run-tasks:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     env:
       # Priority: GitHub Secret -> GitHub Variable -> production alias
       VERCEL_BASE_URL: ${{ secrets.VERCEL_BASE_URL || vars.VERCEL_BASE_URL || 'https://ghost-bot-ashen.vercel.app' }}
@@ -16,88 +21,92 @@ jobs:
       - name: Validate base URL
         run: |
           if [ -z "${VERCEL_BASE_URL}" ]; then
-            echo "Missing VERCEL_BASE_URL (set secret/variable), and no fallback URL available."
-            exit 1
+            export VERCEL_BASE_URL="https://ghost-bot-ashen.vercel.app"
+            echo "VERCEL_BASE_URL was empty; using fallback ${VERCEL_BASE_URL}"
           fi
           echo "Using base URL: ${VERCEL_BASE_URL}"
 
       - name: Health check
+        continue-on-error: true
         shell: bash
         run: |
-          set -euo pipefail
+          set -uo pipefail
           BASE="${VERCEL_BASE_URL%/}"
-          code=$(curl -sS -o /tmp/health.txt -w "%{http_code}" "${BASE}/health")
+          code=$(curl -sS --retry 3 --retry-delay 2 --connect-timeout 5 -o /tmp/health.txt -w "%{http_code}" "${BASE}/health" || echo "000")
           cat /tmp/health.txt
           echo ""
-          if [ "$code" -ge 400 ]; then
-            echo "Health check failed with HTTP $code"
-            exit 1
+          if [ "$code" = "000" ] || [ "$code" -ge 400 ]; then
+            echo "WARNING: health check failed with HTTP $code"
           fi
 
       - name: Run alerts task
+        continue-on-error: true
         shell: bash
         run: |
-          set -euo pipefail
+          set -uo pipefail
           BASE="${VERCEL_BASE_URL%/}"
           if [ -n "${CRON_SECRET}" ]; then
-            code=$(curl -sS -o /tmp/alerts.txt -w "%{http_code}" -X POST -H "Authorization: Bearer ${CRON_SECRET}" "${BASE}/tasks/alerts/run")
+            code=$(curl -sS --retry 3 --retry-delay 2 --connect-timeout 5 -o /tmp/alerts.txt -w "%{http_code}" -X POST -H "Authorization: Bearer ${CRON_SECRET}" "${BASE}/tasks/alerts/run" || echo "000")
           else
-            code=$(curl -sS -o /tmp/alerts.txt -w "%{http_code}" -X POST "${BASE}/tasks/alerts/run")
+            code=$(curl -sS --retry 3 --retry-delay 2 --connect-timeout 5 -o /tmp/alerts.txt -w "%{http_code}" -X POST "${BASE}/tasks/alerts/run" || echo "000")
           fi
           cat /tmp/alerts.txt
           echo ""
-          if [ "$code" -ge 400 ]; then
+          if [ "$code" = "000" ] || [ "$code" -ge 400 ]; then
             echo "WARNING: alerts task failed with HTTP $code"
           fi
 
       - name: Run giveaways task
+        continue-on-error: true
         shell: bash
         run: |
-          set -euo pipefail
+          set -uo pipefail
           BASE="${VERCEL_BASE_URL%/}"
           if [ -n "${CRON_SECRET}" ]; then
-            code=$(curl -sS -o /tmp/giveaways.txt -w "%{http_code}" -X POST -H "Authorization: Bearer ${CRON_SECRET}" "${BASE}/tasks/giveaways/run")
+            code=$(curl -sS --retry 3 --retry-delay 2 --connect-timeout 5 -o /tmp/giveaways.txt -w "%{http_code}" -X POST -H "Authorization: Bearer ${CRON_SECRET}" "${BASE}/tasks/giveaways/run" || echo "000")
           else
-            code=$(curl -sS -o /tmp/giveaways.txt -w "%{http_code}" -X POST "${BASE}/tasks/giveaways/run")
+            code=$(curl -sS --retry 3 --retry-delay 2 --connect-timeout 5 -o /tmp/giveaways.txt -w "%{http_code}" -X POST "${BASE}/tasks/giveaways/run" || echo "000")
           fi
           cat /tmp/giveaways.txt
           echo ""
-          if [ "$code" -ge 400 ]; then
+          if [ "$code" = "000" ] || [ "$code" -ge 400 ]; then
             echo "WARNING: giveaways task failed with HTTP $code"
           fi
 
       - name: Refresh RSI market scan
+        continue-on-error: true
         shell: bash
         run: |
-          set -euo pipefail
+          set -uo pipefail
           BASE="${VERCEL_BASE_URL%/}"
           if [ -n "${CRON_SECRET}" ]; then
-            code=$(curl -sS -o /tmp/rsi.txt -w "%{http_code}" -X POST -H "Authorization: Bearer ${CRON_SECRET}" "${BASE}/tasks/rsi/refresh")
+            code=$(curl -sS --retry 3 --retry-delay 2 --connect-timeout 5 -o /tmp/rsi.txt -w "%{http_code}" -X POST -H "Authorization: Bearer ${CRON_SECRET}" "${BASE}/tasks/rsi/refresh" || echo "000")
           else
-            code=$(curl -sS -o /tmp/rsi.txt -w "%{http_code}" -X POST "${BASE}/tasks/rsi/refresh")
+            code=$(curl -sS --retry 3 --retry-delay 2 --connect-timeout 5 -o /tmp/rsi.txt -w "%{http_code}" -X POST "${BASE}/tasks/rsi/refresh" || echo "000")
           fi
           cat /tmp/rsi.txt
           echo ""
-          if [ "$code" -ge 400 ]; then
+          if [ "$code" = "000" ] || [ "$code" -ge 400 ]; then
             echo "WARNING: rsi refresh task failed with HTTP $code"
           fi
 
       - name: Run news warm task every 15 minutes
+        continue-on-error: true
         shell: bash
         run: |
-          set -euo pipefail
+          set -uo pipefail
           MINUTE=$(date -u +%M)
           MOD=$((10#$MINUTE % 15))
           if [ "$MOD" -eq 0 ]; then
             BASE="${VERCEL_BASE_URL%/}"
             if [ -n "${CRON_SECRET}" ]; then
-              code=$(curl -sS -o /tmp/news.txt -w "%{http_code}" -X POST -H "Authorization: Bearer ${CRON_SECRET}" "${BASE}/tasks/news/warm")
+              code=$(curl -sS --retry 3 --retry-delay 2 --connect-timeout 5 -o /tmp/news.txt -w "%{http_code}" -X POST -H "Authorization: Bearer ${CRON_SECRET}" "${BASE}/tasks/news/warm" || echo "000")
             else
-              code=$(curl -sS -o /tmp/news.txt -w "%{http_code}" -X POST "${BASE}/tasks/news/warm")
+              code=$(curl -sS --retry 3 --retry-delay 2 --connect-timeout 5 -o /tmp/news.txt -w "%{http_code}" -X POST "${BASE}/tasks/news/warm" || echo "000")
             fi
             cat /tmp/news.txt
             echo ""
-            if [ "$code" -ge 400 ]; then
+            if [ "$code" = "000" ] || [ "$code" -ge 400 ]; then
               echo "WARNING: news warm task failed with HTTP $code"
             fi
           else

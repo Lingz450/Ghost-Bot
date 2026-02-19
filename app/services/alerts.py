@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.adapters.market_router import MarketDataRouter
 from app.adapters.prices import PriceAdapter
 from app.core.cache import RedisCache
 from app.db.models import Alert, User
@@ -16,14 +17,18 @@ class AlertsService:
         db_factory,
         cache: RedisCache,
         price_adapter: PriceAdapter,
+        market_router: MarketDataRouter | None,
         alerts_limit_per_day: int,
         cooldown_minutes: int,
+        max_deviation_pct: float = 30.0,
     ) -> None:
         self.db_factory = db_factory
         self.cache = cache
         self.price_adapter = price_adapter
+        self.market_router = market_router
         self.alerts_limit_per_day = alerts_limit_per_day
         self.cooldown_minutes = cooldown_minutes
+        self.max_deviation_pct = max(1.0, float(max_deviation_pct))
 
     async def _get_or_create_user(self, session: AsyncSession, chat_id: int) -> User:
         q = await session.execute(select(User).where(User.telegram_chat_id == chat_id))
@@ -41,6 +46,22 @@ class AlertsService:
         count = await self.cache.incr_with_expiry(daily_key, 86400)
         if count > self.alerts_limit_per_day:
             raise RuntimeError("Daily alert creation limit reached.")
+        quote = None
+        if source != "button":
+            try:
+                quote = await self.price_adapter.get_price(symbol)
+                current = float(quote["price"])
+                if current > 0:
+                    deviation_pct = abs((float(target_price) - current) / current) * 100.0
+                    if deviation_pct > self.max_deviation_pct:
+                        raise RuntimeError(
+                            f"Alert target is {deviation_pct:.1f}% away from current price. "
+                            f"Use a closer level (<={self.max_deviation_pct:.0f}%) or confirm with a tighter target."
+                        )
+            except RuntimeError:
+                raise
+            except Exception:  # noqa: BLE001
+                pass
 
         async with self.db_factory() as session:
             user = await self._get_or_create_user(session, chat_id)
@@ -51,11 +72,39 @@ class AlertsService:
                 target_price=target_price,
                 status="active",
                 source=source,
+                source_exchange=(quote or {}).get("exchange"),
+                instrument_id=(quote or {}).get("instrument_id"),
+                market_kind=(quote or {}).get("market_kind") or "spot",
             )
             session.add(alert)
             await session.commit()
             await session.refresh(alert)
             return alert
+
+    async def _get_alert_price(self, alert: Alert) -> tuple[float | None, dict]:
+        if self.market_router and alert.source_exchange and alert.instrument_id:
+            ex = str(alert.source_exchange).lower()
+            adapter = self.market_router.adapters.get(ex)
+            if adapter:
+                try:
+                    payload = await adapter.get_price(alert.instrument_id, market_kind=alert.market_kind or "spot")
+                    return float(payload["price"]), {
+                        "exchange": ex,
+                        "instrument_id": alert.instrument_id,
+                        "market_kind": alert.market_kind or "spot",
+                    }
+                except Exception:  # noqa: BLE001
+                    pass
+
+        try:
+            fallback = await self.price_adapter.get_price(alert.symbol)
+            return float(fallback["price"]), {
+                "exchange": fallback.get("exchange"),
+                "instrument_id": fallback.get("instrument_id"),
+                "market_kind": fallback.get("market_kind") or "spot",
+            }
+        except Exception:  # noqa: BLE001
+            return None, {}
 
     async def list_alerts(self, chat_id: int) -> list[Alert]:
         async with self.db_factory() as session:
@@ -83,6 +132,25 @@ class AlertsService:
             await session.commit()
             return True
 
+    async def delete_alerts_by_symbol(self, chat_id: int, symbol: str) -> int:
+        target = symbol.upper()
+        async with self.db_factory() as session:
+            user_q = await session.execute(select(User).where(User.telegram_chat_id == chat_id))
+            user = user_q.scalar_one_or_none()
+            if not user:
+                return 0
+            q = await session.execute(
+                select(Alert).where(
+                    Alert.user_id == user.id,
+                    Alert.symbol == target,
+                )
+            )
+            alerts = list(q.scalars().all())
+            for row in alerts:
+                await session.delete(row)
+            await session.commit()
+            return len(alerts)
+
     def _condition_met(self, condition: str, target: float, prev_price: float, current_price: float) -> bool:
         if condition == "above":
             return prev_price < target <= current_price
@@ -101,20 +169,27 @@ class AlertsService:
                 return 0
 
             symbol_prices: dict[str, float] = {}
+            symbol_source: dict[str, dict] = {}
             for alert in alerts:
-                if alert.symbol not in symbol_prices:
-                    try:
-                        symbol_prices[alert.symbol] = float((await self.price_adapter.get_price(alert.symbol))["price"])
-                    except Exception:  # noqa: BLE001
+                key = f"{alert.symbol}:{alert.source_exchange}:{alert.instrument_id}:{alert.market_kind}"
+                if key not in symbol_prices:
+                    price_value, source_info = await self._get_alert_price(alert)
+                    if price_value is None:
                         continue
+                    symbol_prices[key] = float(price_value)
+                    symbol_source[key] = source_info
 
             now = datetime.utcnow()
             for alert in alerts:
-                if alert.symbol not in symbol_prices:
+                key = f"{alert.symbol}:{alert.source_exchange}:{alert.instrument_id}:{alert.market_kind}"
+                if key not in symbol_prices:
                     continue
 
-                current_price = symbol_prices[alert.symbol]
-                prev_key = f"alert:lastprice:{alert.symbol}"
+                current_price = symbol_prices[key]
+                prev_key = (
+                    f"alert:lastprice:{alert.symbol}:"
+                    f"{alert.source_exchange or 'auto'}:{alert.instrument_id or 'na'}:{alert.market_kind or 'spot'}"
+                )
                 prev_payload = await self.cache.get_json(prev_key)
                 prev_price = float(prev_payload["price"]) if prev_payload else current_price
 
@@ -134,6 +209,13 @@ class AlertsService:
                 alert.triggered_at = now
                 alert.cooldown_until = now + timedelta(minutes=self.cooldown_minutes)
                 alert.last_triggered_price = current_price
+                src = symbol_source.get(key, {})
+                if src.get("exchange"):
+                    alert.source_exchange = str(src.get("exchange"))
+                if src.get("instrument_id"):
+                    alert.instrument_id = str(src.get("instrument_id"))
+                if src.get("market_kind"):
+                    alert.market_kind = str(src.get("market_kind"))
                 triggered_count += 1
 
                 user_q = await session.execute(select(User).where(User.id == alert.user_id))
@@ -143,7 +225,7 @@ class AlertsService:
                         user.telegram_chat_id,
                         (
                             f"Alert #{alert.id} hit: {alert.symbol} {alert.condition} {alert.target_price:.4f}\n"
-                            f"Now: {current_price:.4f} (source: live)"
+                            f"Now: {current_price:.4f} (source: {alert.source_exchange or 'live'} {alert.market_kind or ''})"
                         ),
                     )
 

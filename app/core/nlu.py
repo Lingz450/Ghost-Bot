@@ -10,6 +10,10 @@ from typing import Any
 class Intent(str, Enum):
     ANALYSIS = "analysis"
     RSI_SCAN = "rsi_scan"
+    EMA_SCAN = "ema_scan"
+    CHART = "chart"
+    HEATMAP = "heatmap"
+    TRADE_MATH = "trade_math"
     SETUP_REVIEW = "setup_review"
     ASSET_UNSUPPORTED = "asset_unsupported"
     SMALLTALK = "smalltalk"
@@ -23,6 +27,10 @@ class Intent(str, Enum):
     PAIR_FIND = "pair_find"
     PRICE_GUESS = "price_guess"
     GIVEAWAY_JOIN = "giveaway_join"
+    GIVEAWAY_START = "giveaway_start"
+    GIVEAWAY_STATUS = "giveaway_status"
+    GIVEAWAY_CANCEL = "giveaway_cancel"
+    GIVEAWAY_REROLL = "giveaway_reroll"
     NEWS = "news"
     SCAN_WALLET = "scan_wallet"
     CYCLE = "cycle"
@@ -35,7 +43,7 @@ class Intent(str, Enum):
 
 
 SYMBOL_RE = re.compile(r"\b[A-Za-z]{2,12}\b")
-TIMEFRAME_RE = re.compile(r"\b(1m|3m|5m|15m|30m|1h|2h|4h|6h|12h|1d|1w|daily|weekly|monthly)\b", re.IGNORECASE)
+TIMEFRAME_RE = re.compile(r"\b(1m|3m|5m|15m|30m|1h|2h|4h|6h|12h|1d|3d|1w|daily|weekly|monthly)\b", re.IGNORECASE)
 PRICE_RE = re.compile(r"(?<!\w)((?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)(?!\w)")
 SOL_ADDRESS_RE = re.compile(r"\b[1-9A-HJ-NP-Za-km-z]{32,44}\b")
 TRON_ADDRESS_RE = re.compile(r"\bT[1-9A-HJ-NP-Za-km-z]{33}\b")
@@ -64,6 +72,7 @@ SUPPORTED_TIMEFRAMES = {
     "6h",
     "12h",
     "1d",
+    "3d",
     "1w",
     "1M",
 }
@@ -94,6 +103,16 @@ COMMON_STOPWORDS = {
     "following",
     "check",
     "trade",
+    "sl",
+    "tp",
+    "tp1",
+    "tp2",
+    "lev",
+    "rr",
+    "pnl",
+    "margin",
+    "amount",
+    "leverage",
     "from",
     "yesterday",
     "entry",
@@ -119,6 +138,10 @@ COMMON_STOPWORDS = {
     "token",
     "price",
     "to",
+    "and",
+    "a",
+    "an",
+    "set",
     "right",
     "now",
     "my",
@@ -133,6 +156,28 @@ COMMON_STOPWORDS = {
     "chatgpt",
     "gpt",
     "codex",
+    "crypto",
+    "remove",
+    "delete",
+    "chart",
+    "candle",
+    "candles",
+    "plot",
+    "heatmap",
+    "orderbook",
+    "order",
+    "book",
+    "depth",
+    "pick",
+    "winner",
+    "winners",
+    "giveaway",
+    "run",
+    "start",
+    "status",
+    "cancel",
+    "reroll",
+    "join",
 }
 
 
@@ -158,11 +203,29 @@ def normalize_symbol(raw: str) -> str:
 
 def parse_timeframe(text: str) -> str | None:
     match = TIMEFRAME_RE.search(text)
-    if not match:
+    if match:
+        tf = match.group(1).lower()
+        mapping = {"daily": "1d", "weekly": "1w", "monthly": "1M"}
+        return mapping.get(tf, tf)
+
+    lower = text.lower()
+    flex_match = re.search(
+        r"\b(\d+)\s*(m|min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days|w|wk|week|weeks)\b",
+        lower,
+    )
+    if not flex_match:
         return None
-    tf = match.group(1).lower()
-    mapping = {"daily": "1d", "weekly": "1w", "monthly": "1M"}
-    return mapping.get(tf, tf)
+    n = int(flex_match.group(1))
+    unit = flex_match.group(2)
+    if unit.startswith("m"):
+        tf = f"{n}m"
+    elif unit.startswith("h"):
+        tf = f"{n}h"
+    elif unit.startswith("d"):
+        tf = f"{n}d"
+    else:
+        tf = f"{n}w"
+    return tf if tf in SUPPORTED_TIMEFRAMES else None
 
 
 def _dedupe_list(items: list[Any]) -> list[Any]:
@@ -198,6 +261,21 @@ def parse_timeframes_request(text: str) -> tuple[list[str] | None, bool, list[st
     for token in TIMEFRAME_TOKEN_RE.findall(text):
         tokens.append(_normalize_timeframe_token(token))
 
+    flex_chunks = re.findall(
+        r"\b(\d+)\s*(m|min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days|w|wk|week|weeks)\b",
+        lower,
+    )
+    for n_raw, unit in flex_chunks:
+        n = int(n_raw)
+        if unit.startswith("m"):
+            tokens.append(f"{n}m")
+        elif unit.startswith("h"):
+            tokens.append(f"{n}h")
+        elif unit.startswith("d"):
+            tokens.append(f"{n}d")
+        else:
+            tokens.append(f"{n}w")
+
     tokens = _dedupe_list(tokens)
 
     valid: list[str] = []
@@ -217,7 +295,12 @@ def parse_timeframes_request(text: str) -> tuple[list[str] | None, bool, list[st
     return (valid or None), all_requested, notes
 
 
-def _parse_periods(text: str, kind: str, max_items: int) -> tuple[list[int] | None, bool, list[str]]:
+def _parse_periods(
+    text: str,
+    kind: str,
+    max_items: int,
+    max_value: int = 500,
+) -> tuple[list[int] | None, bool, list[str]]:
     notes: list[str] = []
     lower = text.lower()
     all_requested = bool(re.search(rf"\ball\s+{kind}s?\b", lower))
@@ -233,7 +316,7 @@ def _parse_periods(text: str, kind: str, max_items: int) -> tuple[list[int] | No
     for match in re.finditer(rf"\b{kind}\s*([0-9]{{1,4}})\b", lower):
         periods.append(int(match.group(1)))
 
-    valid = _dedupe_list([p for p in periods if 2 <= p <= 500])
+    valid = _dedupe_list([p for p in periods if 2 <= p <= max_value])
 
     if len(valid) > max_items:
         valid = valid[:max_items]
@@ -243,11 +326,35 @@ def _parse_periods(text: str, kind: str, max_items: int) -> tuple[list[int] | No
 
 
 def parse_ema_request(text: str) -> tuple[list[int] | None, bool, list[str]]:
-    return _parse_periods(text, "ema", MAX_EMA_PERIODS)
+    return _parse_periods(text, "ema", MAX_EMA_PERIODS, max_value=500)
 
 
 def parse_rsi_request(text: str) -> tuple[list[int] | None, bool, list[str]]:
-    return _parse_periods(text, "rsi", MAX_RSI_PERIODS)
+    return _parse_periods(text, "rsi", MAX_RSI_PERIODS, max_value=50)
+
+
+def parse_duration_token(text: str) -> str | None:
+    lower = text.lower()
+    match = re.search(
+        r"\b(\d+)\s*(s|sec|secs|second|seconds|m|min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days)\b",
+        lower,
+    )
+    if not match:
+        quick = re.search(r"\b(\d+)\s*([smhd])\b", lower)
+        if not quick:
+            return None
+        return f"{int(quick.group(1))}{quick.group(2)}"
+    value = int(match.group(1))
+    unit = match.group(2)
+    if unit.startswith("s"):
+        suffix = "s"
+    elif unit.startswith("m"):
+        suffix = "m"
+    elif unit.startswith("h"):
+        suffix = "h"
+    else:
+        suffix = "d"
+    return f"{value}{suffix}"
 
 
 def parse_timestamp(text: str, now: datetime | None = None) -> datetime | None:
@@ -356,6 +463,12 @@ def parse_setup_levels(text: str) -> tuple[float | None, float | None, list[floa
     )
     for tm in target_matches:
         segment = tm.group(1)[:180]
+        segment = re.split(
+            r"\b(leverage|lev|margin|amount|size|position|risk|rr|r:r|pnl|with)\b",
+            segment,
+            maxsplit=1,
+            flags=re.IGNORECASE,
+        )[0]
         for val, _, _ in _extract_prices_with_positions(segment):
             targets.append(val)
 
@@ -396,11 +509,14 @@ def _parse_news_intent(text: str) -> ParsedMessage | None:
             "what happened today",
             "latest today",
             "today brief",
+            "what's new with openai",
+            "whats new with openai",
         )
     )
+    has_newsish = bool(re.search(r"\b(news|new|update|updates|changelog|release)\b", lower))
 
     if not (is_news_command or has_news_words or has_today_prompt):
-        if not ((has_macro or has_openai) and ("today" in lower or "latest" in lower)):
+        if not ((has_macro or has_openai) and ("today" in lower or "latest" in lower or has_newsish)):
             return None
 
     topic: str | None = None
@@ -440,6 +556,8 @@ def parse_message(text: str) -> ParsedMessage:
         return ParsedMessage(Intent.SETTINGS)
     if lower.startswith("/join"):
         return ParsedMessage(Intent.GIVEAWAY_JOIN)
+    if lower.strip() == "join":
+        return ParsedMessage(Intent.GIVEAWAY_JOIN)
 
     if "asset unsupported" in lower or "symbol unsupported" in lower:
         return ParsedMessage(Intent.ASSET_UNSUPPORTED)
@@ -468,6 +586,41 @@ def parse_message(text: str) -> ParsedMessage:
 
     if re.search(r"\bresume\s+alerts?\b", lower):
         return ParsedMessage(Intent.ALERT_RESUME)
+
+    if re.search(r"\b(remove|delete)\s+(my\s+)?[a-z]{2,12}\s+alerts?\b", lower):
+        symbols = _extract_symbols(stripped)
+        symbol = symbols[0] if symbols else None
+        if symbol:
+            return ParsedMessage(Intent.ALERT_DELETE, {"symbol": symbol})
+
+    if "ema" in lower and re.search(r"\b(top|closest|near|scan|coins?|which)\b", lower):
+        tf_list, _, notes = parse_timeframes_request(stripped)
+        timeframe = parse_timeframe(lower) or (tf_list[0] if tf_list else "1h")
+        ema_periods, _, ema_notes = parse_ema_request(stripped)
+        notes.extend(ema_notes)
+        ema_len = int(ema_periods[0]) if ema_periods else 200
+        limit_match = re.search(r"\btop\s+(\d{1,2})\b|\b(\d{1,2})\s*$", lower)
+        limit = 10
+        if limit_match:
+            for g in limit_match.groups():
+                if g and g.isdigit():
+                    limit = max(1, min(int(g), 20))
+                    break
+        mode = "closest"
+        if "above" in lower:
+            mode = "above"
+        elif "below" in lower:
+            mode = "below"
+        return ParsedMessage(
+            Intent.EMA_SCAN,
+            {
+                "timeframe": timeframe,
+                "ema_length": ema_len,
+                "mode": mode,
+                "limit": limit,
+                "notes": notes,
+            },
+        )
 
     if "rsi" in lower and re.search(r"\b(scan|top|overbought|oversold)\b", lower):
         tf_list, _, notes = parse_timeframes_request(stripped)
@@ -534,6 +687,56 @@ def parse_message(text: str) -> ParsedMessage:
 
     if "/cycle" in lower or "cycle check" in lower or "bull market top" in lower or "halving" in lower:
         return ParsedMessage(Intent.CYCLE)
+
+    if re.search(r"\b(chart|candles?|plot)\b", lower):
+        symbols = _extract_symbols(stripped)
+        if not symbols:
+            return ParsedMessage(Intent.CHART, {}, True, "Which symbol should I chart?")
+        return ParsedMessage(
+            Intent.CHART,
+            {"symbol": symbols[0], "timeframe": parse_timeframe(lower) or "1h"},
+        )
+
+    if re.search(r"\b(heatmap|order\s*book|orderbook|depth)\b", lower):
+        symbols = _extract_symbols(stripped)
+        symbol = symbols[0] if symbols else "BTC"
+        return ParsedMessage(Intent.HEATMAP, {"symbol": symbol})
+
+    if re.search(r"\bgiveaway\b", lower) and re.search(r"\b(status|active)\b", lower):
+        return ParsedMessage(Intent.GIVEAWAY_STATUS)
+
+    if re.search(r"\bgiveaway\b", lower) and re.search(r"\b(cancel|stop|end)\b", lower):
+        return ParsedMessage(Intent.GIVEAWAY_CANCEL)
+
+    if re.search(r"\bgiveaway\b", lower) and re.search(r"\b(reroll|pick again|new winner)\b", lower):
+        return ParsedMessage(Intent.GIVEAWAY_REROLL)
+
+    duration_token = parse_duration_token(stripped)
+    has_giveaway_phrase = bool(re.search(r"\bgiveaway\b", lower))
+    has_pick_winner_phrase = bool(re.search(r"\bpick (a )?winner\b", lower))
+    has_giveaway_state_word = bool(re.search(r"\b(status|active|cancel|stop|end|reroll)\b", lower))
+    giveaway_start = bool(
+        duration_token
+        and (
+            has_pick_winner_phrase
+            or (has_giveaway_phrase and not has_giveaway_state_word)
+        )
+    )
+    if giveaway_start:
+        prize_match = re.search(
+            r"\bprize\b\s+(.+?)(?:\s+\bwinners?\b\s*\d+)?\s*$",
+            stripped,
+            flags=re.IGNORECASE,
+        )
+        winners_match = re.search(r"\bwinners?\b\s*(\d+)", lower)
+        return ParsedMessage(
+            Intent.GIVEAWAY_START,
+            {
+                "duration": duration_token or "10m",
+                "prize": (prize_match.group(1).strip() if prize_match else "Prize"),
+                "winners": int(winners_match.group(1)) if winners_match else 1,
+            },
+        )
 
     direction_watch = re.search(
         r"\b(?:coin|coins|which|what|best)\b.*\bto\s+(long|short)\b|\b(?:long|short)\s+(?:coin|coins)\b",
@@ -611,9 +814,15 @@ def parse_message(text: str) -> ParsedMessage:
             entities["timestamp"] = datetime.now(timezone.utc) - timedelta(days=1)
         return ParsedMessage(Intent.TRADECHECK, entities)
 
-    setup_hint = bool(
-        re.search(r"\b(entry|stop|sl|targets?|tp\d*|limit)\b", lower)
-        and ("long" in lower or "short" in lower or "setup" in lower or "play" in lower)
+    setup_signal = bool(re.search(r"\b(entry|stop|sl|targets?|tp\d*|limit)\b", lower))
+    math_signal = bool(
+        re.search(
+            r"\b(rr|r:r|risk\s*reward|risk/reward|pnl|profit|loss|size me|position size)\b",
+            lower,
+        )
+    )
+    setup_hint = setup_signal and (
+        "long" in lower or "short" in lower or "setup" in lower or "play" in lower or math_signal
     )
     if setup_hint:
         symbols = _extract_symbols(stripped)
@@ -625,6 +834,7 @@ def parse_message(text: str) -> ParsedMessage:
             [
                 r"(?:\bamount\b|\bsize\b|\bposition\b)\s*[:=]?\s*\$?\s*([0-9][0-9,]*(?:\.[0-9]+)?)",
                 r"\bmargin\b\s*[:=]?\s*\$?\s*([0-9][0-9,]*(?:\.[0-9]+)?)",
+                r"\$?\s*([0-9][0-9,]*(?:\.[0-9]+)?)\s*\bmargin\b",
             ],
         )
         leverage = _parse_single_level(
@@ -647,6 +857,22 @@ def parse_message(text: str) -> ParsedMessage:
             "leverage": leverage,
             "notes": tf_notes,
         }
+        if math_signal:
+            direction = entities.get("direction")
+            if not direction and entry is not None and targets:
+                first_tp = float(targets[0])
+                direction = "long" if first_tp >= float(entry) else "short"
+                entities["direction"] = direction
+            missing = [k for k in ("entry", "stop") if entities.get(k) is None]
+            if missing or not targets:
+                return ParsedMessage(
+                    Intent.TRADE_MATH,
+                    entities,
+                    True,
+                    "Drop entry, stop, and at least one target to calculate R:R and PnL.",
+                )
+            return ParsedMessage(Intent.TRADE_MATH, entities)
+
         missing = [k for k in ("symbol", "entry", "stop") if not entities.get(k)]
         if missing or not targets:
             return ParsedMessage(

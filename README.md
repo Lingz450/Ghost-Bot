@@ -7,6 +7,9 @@ Production-ready Telegram bot for crypto analysis, alerts, wallet scans, cycle c
 - Trade plans from natural language (`SOL long`, `ETH short`, `Long?`) using TA + market narrative
 - Price alerts (`ping me when SOL hits 100`) with one-shot trigger + anti-spam dedupe/cooldown
 - RSI scanner (`rsi top 10 1h oversold`, `top rsi 4h overbought`)
+- EMA scanner (`ema 200 4h top 10`, `which coins are near ema50 1h`)
+- Chart images (`chart btc 1h`, `show me sol chart 4h`)
+- Orderbook heatmap (`heatmap btc`, `orderbook depth sol`)
 - Wallet scans for Solana/Tron (`scan solana <addr>`, `scan tron <addr>`)
 - Cycle checks (`cycle check`, `are we near top?`)
 - Trade verification (`check this trade from yesterday: ...`) with same-candle ambiguity modes
@@ -37,7 +40,8 @@ This bot is analysis only. It does **not** place trades.
 - `app/bot/handlers.py` - Telegram handlers (commands + NLU routing + callbacks)
 - `app/core/nlu.py` - deterministic regex/heuristic intent/entity parser
 - `app/services/` - analysis/alerts/wallet/news/watchlist/cycle/correlation/trade-verify
-- `app/adapters/` - Binance/CoinGecko/Derivatives/RSS/Solana/Tron adapters
+- `app/adapters/` - market router + multi-exchange adapters + RSS/Solana/Tron adapters
+- `app/adapters/exchanges/` - Binance, Bybit, OKX (and optional MEXC/BloFin) market clients
 - `app/db/models.py` - DB schema models
 - `app/db/migrations/versions/0001_initial.py` - initial Alembic migration
 - `app/workers/scheduler.py` - periodic alert monitor + news refresh
@@ -148,6 +152,7 @@ Primary runtime:
   - Note: Vercel native cron calls are accepted via `x-vercel-cron` header automatically.
 - `OPENAI_API_KEY` (optional, enables freeform Q&A fallback)
 - `OPENAI_MODEL` (default `gpt-4.1-mini`)
+- `OPENAI_ROUTER_MODEL` (optional; use a smaller model just for JSON intent routing)
 - `OPENAI_MAX_OUTPUT_TOKENS` (default `350`)
 - `OPENAI_TEMPERATURE` (default `0.7`)
 - `OPENAI_ROUTER_MIN_CONFIDENCE` (default `0.6`, LLM intent router execution threshold)
@@ -163,6 +168,19 @@ Data source/adapters:
 
 - `BINANCE_BASE_URL`
 - `BINANCE_FUTURES_BASE_URL`
+- `BYBIT_BASE_URL`
+- `OKX_BASE_URL`
+- `MEXC_BASE_URL`
+- `BLOFIN_BASE_URL`
+- `ENABLE_BINANCE`
+- `ENABLE_BYBIT`
+- `ENABLE_OKX`
+- `ENABLE_MEXC`
+- `ENABLE_BLOFIN`
+- `EXCHANGE_PRIORITY` (default `binance,bybit,okx,mexc,blofin`)
+- `MARKET_PREFER_SPOT` (default `true`; TA/price/ohlcv route as spot-first then perp)
+- `BEST_SOURCE_TTL_HOURS` (default `12`)
+- `INSTRUMENTS_TTL_MIN` (default `45`)
 - `COINGECKO_BASE_URL`
 - `NEWS_RSS_FEEDS`
 - `OPENAI_RSS_FEEDS` (optional, official OpenAI update/news feeds)
@@ -178,6 +196,7 @@ Limits/reliability:
 - `ALERTS_CREATE_LIMIT_PER_DAY` (default 10)
 - `ALERT_CHECK_INTERVAL_SEC` (default 30)
 - `ALERT_COOLDOWN_MIN` (default 30)
+- `ALERT_MAX_DEVIATION_PCT` (default 30; rejects unrealistic alert levels too far from current price)
 - `ADMIN_CHAT_IDS` (comma-separated Telegram user IDs allowed to run giveaway admin commands)
 - `GIVEAWAY_MIN_PARTICIPANTS` (default 2)
 - `ANALYSIS_FAST_MODE` (default `true`)
@@ -247,6 +266,17 @@ OpenAI response strategy is configurable:
 - `OPENAI_CHAT_MODE=chat_only`: every message goes straight to OpenAI chat (ChatGPT-like behavior)
 Analysis uses a fast default path (price + TA) and exposes on-demand detail buttons: `More detail`, `Derivatives`, `News`.
 
+### Multi-exchange fallback (automatic)
+
+- Users never choose exchange.
+- Market data routing priority is configurable by `EXCHANGE_PRIORITY`.
+- Router behavior:
+  1. Try spot first in priority order (Binance -> Bybit -> OKX -> optional MEXC/BloFin).
+  2. If no spot market works, fallback to perp in the same order.
+  3. Cache best source per symbol (`best_source:<symbol>:spot|perp`) and reuse it.
+- Source metadata is kept internally for continuity/debugging and alert failover.
+- User-facing replies stay clean by default; ask `source?` or `which exchange?` to reveal the last result source on demand.
+
 Advanced analysis syntax is supported:
 
 - `SOL long 15m ema9 ema21 rsi14`
@@ -260,7 +290,34 @@ Advanced analysis syntax is supported:
 
 Group behavior:
 
-- Bot responds in groups only when mentioned (`@GhotalphaBot`), on `/commands`, or when replying directly to the bot.
+- Default: bot responds in groups when mentioned (`@GhotalphaBot`), on `/commands`, when replying to the bot, or for clear trading intents (`alert/chart/rsi/ema/news/btc/eth/sol`).
+- Admin toggle in group: `free talk mode on` / `free talk mode off`.
+- In private chats: bot responds to all messages.
+
+## Operator guide
+
+1. ChatGPT-like default replies:
+- Set `OPENAI_API_KEY`.
+- Set `OPENAI_CHAT_MODE=llm_first` (recommended).
+- If you want every single message to be pure OpenAI chat, set `OPENAI_CHAT_MODE=chat_only`.
+
+2. Group free-talk controls:
+- In a group, admins can toggle: `free talk mode on` / `free talk mode off`.
+- OFF: bot responds on mention/reply/clear intent.
+- ON: bot can respond without mention (still rate-limited).
+
+3. Scanner universe + speed tuning:
+- `RSI_SCAN_UNIVERSE_SIZE` -> set 500 to 1000.
+- `RSI_SCAN_SCAN_TIMEFRAMES` -> e.g. `15m,1h,4h,1d`.
+- `RSI_SCAN_CONCURRENCY` -> increase cautiously if your host is strong.
+- `RSI_SCAN_FRESHNESS_MINUTES` -> lower for fresher scanner data.
+- `RSI_SCAN_LIVE_FALLBACK_UNIVERSE` -> fallback scan size when snapshots are stale.
+
+4. Alert realism guard:
+- `ALERT_MAX_DEVIATION_PCT` rejects unrealistic far targets by default.
+
+5. Vercel serverless tasks:
+- Keep GitHub Actions scheduler enabled (`.github/workflows/serverless-tasks.yml`) to run alerts/giveaways/scanner/news tasks every few minutes on Hobby.
 
 ## Manual QA (acceptance scenarios)
 
@@ -302,6 +359,9 @@ curl -X POST http://localhost:8000/test/mock-price \
 
 9. Send `is BIRB following BTC?`
 - Expected: verdict + corr/beta + relative performance bullets
+
+10. Send `ema 200 4h top 10` or `chart btc 1h`
+- Expected: EMA proximity scan list and chart image response
 
 ## Test mode (local-safe)
 

@@ -8,6 +8,7 @@ import pandas as pd
 from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert
 
+from app.adapters.market_router import MarketDataRouter
 from app.adapters.ohlcv import OHLCVAdapter
 from app.core.cache import RedisCache
 from app.core.http import ResilientHTTPClient
@@ -26,6 +27,8 @@ class RSIScannerService:
         http: ResilientHTTPClient,
         cache: RedisCache,
         ohlcv_adapter: OHLCVAdapter,
+        market_router: MarketDataRouter,
+        coingecko_base: str,
         binance_base: str,
         db_factory,
         universe_size: int = 500,
@@ -37,6 +40,8 @@ class RSIScannerService:
         self.http = http
         self.cache = cache
         self.ohlcv_adapter = ohlcv_adapter
+        self.market_router = market_router
+        self.coingecko_base = coingecko_base
         self.binance_base = binance_base
         self.db_factory = db_factory
         self.universe_size = max(100, min(int(universe_size), 1000))
@@ -60,6 +65,41 @@ class RSIScannerService:
         if cached:
             return [{"symbol": str(row["symbol"]), "quote_volume_24h": float(row["quote_volume_24h"])} for row in cached]
 
+        available = await self.market_router.get_market_universe("spot")
+        if available:
+            try:
+                page_size = 250
+                pages = max(1, min((cap // page_size) + 2, 6))
+                markets: list[dict] = []
+                for page in range(1, pages + 1):
+                    chunk = await self.http.get_json(
+                        f"{self.coingecko_base}/coins/markets",
+                        params={
+                            "vs_currency": "usd",
+                            "order": "market_cap_desc",
+                            "per_page": page_size,
+                            "page": page,
+                            "sparkline": "false",
+                        },
+                    )
+                    markets.extend(list(chunk))
+                scored: list[dict] = []
+                for row in markets:
+                    sym = str(row.get("symbol", "")).upper()
+                    if not sym or sym not in available:
+                        continue
+                    vol = float(row.get("total_volume", 0) or 0)
+                    if vol <= 0:
+                        continue
+                    scored.append({"symbol": sym, "quote_volume_24h": vol})
+                if scored:
+                    scored.sort(key=lambda x: x["quote_volume_24h"], reverse=True)
+                    symbols = scored[:cap]
+                    await self.cache.set_json(cache_key, symbols, ttl=300)
+                    return symbols
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("rsi_coingecko_universe_failed", extra={"event": "rsi_universe_error", "error": str(exc)})
+
         try:
             rows = await self.http.get_json(f"{self.binance_base}/api/v3/ticker/24hr")
         except Exception as exc:  # noqa: BLE001
@@ -77,7 +117,10 @@ class RSIScannerService:
                 quote_vol = 0.0
             if quote_vol <= 0:
                 continue
-            scored.append({"symbol": symbol[:-4], "quote_volume_24h": quote_vol})
+            base = symbol[:-4]
+            if available and base not in available:
+                continue
+            scored.append({"symbol": base, "quote_volume_24h": quote_vol})
 
         scored.sort(key=lambda x: x["quote_volume_24h"], reverse=True)
         symbols = scored[:cap]
@@ -88,7 +131,6 @@ class RSIScannerService:
         async with self.db_factory() as session:
             query = await session.execute(
                 select(UniverseSymbol.symbol, UniverseSymbol.quote_volume_24h)
-                .where(UniverseSymbol.exchange == "binance")
                 .order_by(UniverseSymbol.rank.asc())
                 .limit(cap)
             )
@@ -114,7 +156,7 @@ class RSIScannerService:
             rows.append(
                 {
                     "symbol": str(row["symbol"]).upper(),
-                    "exchange": "binance",
+                    "exchange": "router",
                     "rank": idx,
                     "quote_volume_24h": float(row["quote_volume_24h"]),
                     "updated_at": now,
@@ -122,7 +164,7 @@ class RSIScannerService:
             )
 
         async with self.db_factory() as session:
-            await session.execute(delete(UniverseSymbol).where(UniverseSymbol.exchange == "binance"))
+            await session.execute(delete(UniverseSymbol))
             if rows:
                 await session.execute(insert(UniverseSymbol).values(rows))
             await session.commit()
@@ -134,7 +176,6 @@ class RSIScannerService:
         async with self.db_factory() as session:
             query = await session.execute(
                 select(UniverseSymbol.symbol)
-                .where(UniverseSymbol.exchange == "binance")
                 .order_by(UniverseSymbol.rank.asc())
                 .limit(cap)
             )
@@ -147,7 +188,6 @@ class RSIScannerService:
         async with self.db_factory() as session:
             query = await session.execute(
                 select(UniverseSymbol.symbol)
-                .where(UniverseSymbol.exchange == "binance")
                 .order_by(UniverseSymbol.rank.asc())
                 .limit(cap)
             )
@@ -167,7 +207,11 @@ class RSIScannerService:
         if series.empty:
             return None
         value = float(series.iloc[-1])
-        return {"symbol": symbol.upper(), "rsi": round(value, 2)}
+        return {
+            "symbol": symbol.upper(),
+            "rsi": round(value, 2),
+            "source_line": str(candles[-1].get("source_line") or ""),
+        }
 
     async def _symbol_snapshot(self, symbol: str, timeframe: str) -> dict | None:
         try:
@@ -185,10 +229,11 @@ class RSIScannerService:
         if rsi14_series.empty:
             return None
 
+        last_candle = candles[-1] if candles else {}
         return {
             "symbol": symbol.upper(),
             "timeframe": timeframe,
-            "exchange": "binance",
+            "exchange": str(last_candle.get("exchange") or "router"),
             "close_price": float(close.iloc[-1]),
             "rsi14": float(rsi14_series.iloc[-1]),
             "ema20": float(ema(close, 20).iloc[-1]),
@@ -272,18 +317,31 @@ class RSIScannerService:
 
     async def _query_precomputed(self, timeframe: str, mode: str, limit: int) -> list[dict]:
         freshness_cutoff = datetime.now(timezone.utc) - timedelta(minutes=self.freshness_minutes)
-        order_clause = IndicatorSnapshot.rsi14.asc() if mode == "oversold" else IndicatorSnapshot.rsi14.desc()
         async with self.db_factory() as session:
             query = await session.execute(
-                select(IndicatorSnapshot.symbol, IndicatorSnapshot.rsi14)
-                .where(IndicatorSnapshot.exchange == "binance")
+                select(
+                    IndicatorSnapshot.symbol,
+                    IndicatorSnapshot.rsi14,
+                    IndicatorSnapshot.computed_at,
+                )
                 .where(IndicatorSnapshot.timeframe == timeframe)
                 .where(IndicatorSnapshot.computed_at >= freshness_cutoff)
                 .where(IndicatorSnapshot.rsi14.is_not(None))
-                .order_by(order_clause)
-                .limit(limit)
+                .order_by(IndicatorSnapshot.computed_at.desc())
+                .limit(max(limit * 40, 1000))
             )
-            return [{"symbol": str(sym), "rsi": round(float(rsi_v), 2)} for sym, rsi_v in query.all()]
+            rows = query.all()
+
+        latest_by_symbol: dict[str, float] = {}
+        for sym, rsi_v, _computed_at in rows:
+            symbol = str(sym).upper()
+            if symbol in latest_by_symbol:
+                continue
+            latest_by_symbol[symbol] = float(rsi_v)
+
+        ranked = [{"symbol": sym, "rsi": round(val, 2)} for sym, val in latest_by_symbol.items()]
+        ranked.sort(key=lambda x: x["rsi"], reverse=(mode != "oversold"))
+        return ranked[:limit]
 
     async def _scan_live_universe(self, timeframe: str, mode: str, limit: int, rsi_length: int) -> list[dict]:
         top = await self._top_usdt_symbols(universe_size=self.live_fallback_universe)
@@ -358,8 +416,15 @@ class RSIScannerService:
                     "symbol": row["symbol"],
                     "rsi": row["rsi"],
                     "note": self._bucket(float(row["rsi"]), mode_norm),
+                    "source_line": row.get("source_line", ""),
                 }
             )
+
+        source_line = "Data source: precomputed multi-exchange snapshots | Updated: just now"
+        for row in ranked:
+            if row.get("source_line"):
+                source_line = row["source_line"]
+                break
 
         return {
             "summary": f"RSI scan ({mode_norm}) on {tf} using RSI({rsi_length}) [{source}].",
@@ -367,5 +432,6 @@ class RSIScannerService:
             "mode": mode_norm,
             "rsi_length": rsi_length,
             "items": ranked,
+            "source_line": source_line,
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }

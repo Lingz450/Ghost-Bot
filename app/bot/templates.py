@@ -50,6 +50,12 @@ STANDARD_CLOSERS = [
     "Send another ticker if you want a follow-up.",
 ]
 
+UNKNOWN_FOLLOWUPS = [
+    "Give me a clear target: `SOL long`, `cpi news`, `chart BTC 1h`, or `alert me when BTC hits 70000`.",
+    "I can route free text. Try `ETH short 4h`, `rsi top 10 1h oversold`, or `list my alerts`.",
+    "Send the intent directly: `coins to watch 5`, `openai updates`, `scan solana <address>`.",
+]
+
 
 def _style_prefix(settings: dict) -> str:
     if settings.get("formal_mode"):
@@ -123,7 +129,7 @@ def trade_plan_template(plan: dict, settings: dict) -> str:
     updated = plan.get("updated_at")
     if updated:
         lines.append("")
-        lines.append(f"Data: {plan.get('price_source', 'unknown')} | updated {updated}")
+        lines.append(f"Updated: {relative_updated(updated) or updated}")
 
     lines.append(warning)
     if closer:
@@ -160,7 +166,6 @@ def news_template(payload: dict) -> str:
         clean_url = _clean_url(item["url"])
         lines.append("")
         lines.append(f"{idx}) {item['title']}")
-        lines.append(f"Source: {item['source']}")
         lines.append(f"Link: {clean_url}")
         lines.append("")
 
@@ -214,12 +219,13 @@ def cycle_template(payload: dict) -> str:
 
 def trade_verification_template(payload: dict) -> str:
     if payload.get("result") == "not_filled":
-        return (
+        text = (
             f"Trade check for {payload['symbol']}\n"
             f"Result: not filled\n"
             f"{payload['note']}\n"
             "Not financial advice."
         )
+        return text
 
     lines = [
         f"Trade check completed for {payload['symbol']} ({payload['direction']}).",
@@ -269,6 +275,7 @@ def help_text() -> str:
         "- what are the latest news today\n"
         "- cpi news\n"
         "- openai updates\n"
+        "- source? / which exchange?\n"
         "Commands: /start /help /id /settings /watchlist [N] /alert add <symbol> <above|below|cross> <price> /alert list /alert delete <id> /scan <chain> <address> /tradecheck /news /cycle /giveaway start <10m|1h> prize \"...\" /giveaway end /giveaway reroll /giveaway status /join"
     )
 
@@ -346,6 +353,47 @@ def setup_review_template(payload: dict, settings: dict) -> str:
         lines.insert(-2, "")
     if closer:
         lines.append(closer)
+    return "\n".join(lines)
+
+
+def trade_math_template(payload: dict, settings: dict) -> str:
+    tone = _tone_mode(settings)
+    if tone == "wild":
+        opener = "Trade math locked. Here is the risk map."
+    elif tone == "standard":
+        opener = "Trade math summary."
+    else:
+        opener = "Trade risk/reward summary."
+
+    lines = [
+        opener,
+        f"Direction: {payload['direction']}",
+        f"Entry: {payload['entry']}",
+        f"Stop: {payload['stop']}",
+        "Targets: " + ", ".join(str(x) for x in payload["targets"]),
+        "",
+        f"Risk per unit: {payload['risk_per_unit']}",
+        f"Best R: {payload['best_r']}",
+    ]
+    for row in payload.get("rows", [])[:4]:
+        lines.append(f"- TP {row['tp']}: {row['r_multiple']}R")
+
+    position = payload.get("position")
+    if position:
+        lines.extend(
+            [
+                "",
+                "Position sizing:",
+                f"- Margin: ${position['margin_usd']}",
+                f"- Leverage: {position['leverage']}x",
+                f"- Notional: ${position['notional_usd']}",
+                f"- Qty: {position['qty']}",
+                f"- Stop PnL: ${position['stop_pnl_usd']}",
+            ]
+        )
+        for row in position.get("tp_pnls", [])[:4]:
+            lines.append(f"- TP {row['tp']}: ${row['pnl_usd']}")
+    lines.extend(["", "Not financial advice."])
     return "\n".join(lines)
 
 
@@ -430,7 +478,7 @@ def pair_find_template(payload: dict) -> str:
             price = row.get("price")
             price_txt = f"${price}" if price is not None else "n/a"
             lines.append(f"{idx}. {row['symbol']} ({row.get('name')})")
-            lines.append(f"   Pair: {pair} | Binance tradable: {tradable} | Price: {price_txt}")
+            lines.append(f"   Pair: {pair} | Tradable: {tradable} | Price: {price_txt}")
     lines.append("")
     lines.append("If candles are missing, I can still provide narrative + safer execution rules.")
     return "\n".join(lines)
@@ -444,7 +492,7 @@ def price_guess_template(payload: dict) -> str:
         return "\n".join(lines)
     for idx, row in enumerate(matches[:10], start=1):
         tradable = "YES" if row.get("tradable_binance") else "NO"
-        lines.append(f"{idx}. {row['symbol']} ({row.get('name')}) - ${row['price']} | Binance: {tradable}")
+        lines.append(f"{idx}. {row['symbol']} ({row.get('name')}) - ${row['price']} | Tradable: {tradable}")
     lines.append("")
     lines.append("Not financial advice.")
     return "\n".join(lines)
@@ -468,3 +516,7 @@ def giveaway_status_template(payload: dict) -> str:
         f"Prize: {payload.get('prize')}\n"
         f"Winner: {winner_txt}"
     )
+
+
+def unknown_prompt() -> str:
+    return random.choice(UNKNOWN_FOLLOWUPS)

@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     cron_secret: str = Field(default="", alias="CRON_SECRET")
     openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
     openai_model: str = Field(default="gpt-4.1-mini", alias="OPENAI_MODEL")
+    openai_router_model: str = Field(default="", alias="OPENAI_ROUTER_MODEL")
     openai_max_output_tokens: int = Field(default=350, alias="OPENAI_MAX_OUTPUT_TOKENS")
     openai_temperature: float = Field(default=0.7, alias="OPENAI_TEMPERATURE")
     openai_router_min_confidence: float = Field(default=0.6, alias="OPENAI_ROUTER_MIN_CONFIDENCE")
@@ -36,7 +37,20 @@ class Settings(BaseSettings):
 
     binance_base_url: str = "https://api.binance.com"
     binance_futures_base_url: str = "https://fapi.binance.com"
+    bybit_base_url: str = Field(default="https://api.bybit.com", alias="BYBIT_BASE_URL")
+    okx_base_url: str = Field(default="https://www.okx.com", alias="OKX_BASE_URL")
+    mexc_base_url: str = Field(default="https://api.mexc.com", alias="MEXC_BASE_URL")
+    blofin_base_url: str = Field(default="https://openapi.blofin.com", alias="BLOFIN_BASE_URL")
     coingecko_base_url: str = "https://api.coingecko.com/api/v3"
+    enable_binance: bool = Field(default=True, alias="ENABLE_BINANCE")
+    enable_bybit: bool = Field(default=True, alias="ENABLE_BYBIT")
+    enable_okx: bool = Field(default=True, alias="ENABLE_OKX")
+    enable_mexc: bool = Field(default=False, alias="ENABLE_MEXC")
+    enable_blofin: bool = Field(default=False, alias="ENABLE_BLOFIN")
+    exchange_priority: str = Field(default="binance,bybit,okx,mexc,blofin", alias="EXCHANGE_PRIORITY")
+    market_prefer_spot: bool = Field(default=True, alias="MARKET_PREFER_SPOT")
+    best_source_ttl_hours: int = Field(default=12, alias="BEST_SOURCE_TTL_HOURS")
+    instruments_ttl_min: int = Field(default=45, alias="INSTRUMENTS_TTL_MIN")
 
     cryptopanic_api_key: str = ""
     news_rss_feeds: str = (
@@ -59,6 +73,7 @@ class Settings(BaseSettings):
     request_rate_limit_per_minute: int = 20
     wallet_scan_limit_per_hour: int = 10
     alerts_create_limit_per_day: int = 10
+    alert_max_deviation_pct: float = Field(default=30.0, alias="ALERT_MAX_DEVIATION_PCT")
 
     alert_check_interval_sec: int = 30
     alert_cooldown_min: int = 30

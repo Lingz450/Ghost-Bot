@@ -13,6 +13,7 @@ from sqlalchemy import text
 
 from app.adapters.derivatives import DerivativesAdapter
 from app.adapters.llm import LLMClient
+from app.adapters.market_router import MarketDataRouter
 from app.adapters.news_sources import NewsSourcesAdapter
 from app.adapters.ohlcv import OHLCVAdapter
 from app.adapters.prices import PriceAdapter
@@ -31,11 +32,14 @@ from app.services.audit import AuditService
 from app.services.correlation import CorrelationService
 from app.services.cycles import CyclesService
 from app.services.discovery import DiscoveryService
+from app.services.ema_scanner import EMAScannerService
 from app.services.giveaway import GiveawayService
 from app.services.market_analysis import MarketAnalysisService
 from app.services.news import NewsService
+from app.services.orderbook_heatmap import OrderbookHeatmapService
 from app.services.rsi_scanner import RSIScannerService
 from app.services.setup_review import SetupReviewService
+from app.services.charting import ChartService
 from app.services.trade_verify import TradeVerifyService
 from app.services.users import UserService
 from app.services.wallet_scan import WalletScanService
@@ -52,9 +56,30 @@ def build_hub(settings: Settings, bot: Bot, cache: RedisCache, http: ResilientHT
         llm_client = LLMClient(
             api_key=settings.openai_api_key,
             model=settings.openai_model,
+            router_model=settings.openai_router_model or None,
             max_output_tokens=settings.openai_max_output_tokens,
             temperature=settings.openai_temperature,
         )
+
+    market_router = MarketDataRouter(
+        http=http,
+        cache=cache,
+        binance_base_url=settings.binance_base_url,
+        binance_futures_base_url=settings.binance_futures_base_url,
+        bybit_base_url=settings.bybit_base_url,
+        okx_base_url=settings.okx_base_url,
+        mexc_base_url=settings.mexc_base_url,
+        blofin_base_url=settings.blofin_base_url,
+        enable_binance=settings.enable_binance,
+        enable_bybit=settings.enable_bybit,
+        enable_okx=settings.enable_okx,
+        enable_mexc=settings.enable_mexc,
+        enable_blofin=settings.enable_blofin,
+        exchange_priority=settings.exchange_priority,
+        market_prefer_spot=settings.market_prefer_spot,
+        best_source_ttl_hours=settings.best_source_ttl_hours,
+        instruments_ttl_min=settings.instruments_ttl_min,
+    )
 
     price_adapter = PriceAdapter(
         http=http,
@@ -63,9 +88,21 @@ def build_hub(settings: Settings, bot: Bot, cache: RedisCache, http: ResilientHT
         coingecko_base=settings.coingecko_base_url,
         test_mode=settings.test_mode,
         mock_prices=settings.mock_prices,
+        market_router=market_router,
     )
-    ohlcv_adapter = OHLCVAdapter(http=http, cache=cache, binance_base=settings.binance_base_url, coingecko_base=settings.coingecko_base_url)
-    deriv_adapter = DerivativesAdapter(http=http, cache=cache, futures_base=settings.binance_futures_base_url)
+    ohlcv_adapter = OHLCVAdapter(
+        http=http,
+        cache=cache,
+        binance_base=settings.binance_base_url,
+        coingecko_base=settings.coingecko_base_url,
+        market_router=market_router,
+    )
+    deriv_adapter = DerivativesAdapter(
+        http=http,
+        cache=cache,
+        futures_base=settings.binance_futures_base_url,
+        market_router=market_router,
+    )
     news_adapter = NewsSourcesAdapter(
         http=http,
         cache=cache,
@@ -81,6 +118,8 @@ def build_hub(settings: Settings, bot: Bot, cache: RedisCache, http: ResilientHT
         http=http,
         cache=cache,
         ohlcv_adapter=ohlcv_adapter,
+        market_router=market_router,
+        coingecko_base=settings.coingecko_base_url,
         binance_base=settings.binance_base_url,
         db_factory=AsyncSessionLocal,
         universe_size=settings.rsi_scan_universe_size,
@@ -92,6 +131,7 @@ def build_hub(settings: Settings, bot: Bot, cache: RedisCache, http: ResilientHT
     discovery_service = DiscoveryService(
         http=http,
         cache=cache,
+        market_router=market_router,
         price_adapter=price_adapter,
         binance_base=settings.binance_base_url,
         coingecko_base=settings.coingecko_base_url,
@@ -101,11 +141,25 @@ def build_hub(settings: Settings, bot: Bot, cache: RedisCache, http: ResilientHT
         admin_chat_ids=settings.admin_ids_list(),
         min_participants=settings.giveaway_min_participants,
     )
+    ema_scanner_service = EMAScannerService(
+        http=http,
+        cache=cache,
+        ohlcv_adapter=ohlcv_adapter,
+        market_router=market_router,
+        binance_base=settings.binance_base_url,
+        db_factory=AsyncSessionLocal,
+        freshness_minutes=settings.rsi_scan_freshness_minutes,
+        live_fallback_universe=settings.rsi_scan_live_fallback_universe,
+        concurrency=settings.rsi_scan_concurrency,
+    )
+    chart_service = ChartService(ohlcv_adapter=ohlcv_adapter)
+    orderbook_heatmap_service = OrderbookHeatmapService(market_router=market_router)
 
     return ServiceHub(
         bot=bot,
         bot_username=None,
         llm_client=llm_client,
+        market_router=market_router,
         cache=cache,
         rate_limiter=rate_limiter,
         user_service=UserService(AsyncSessionLocal),
@@ -126,8 +180,10 @@ def build_hub(settings: Settings, bot: Bot, cache: RedisCache, http: ResilientHT
             db_factory=AsyncSessionLocal,
             cache=cache,
             price_adapter=price_adapter,
+            market_router=market_router,
             alerts_limit_per_day=settings.alerts_create_limit_per_day,
             cooldown_minutes=settings.alert_cooldown_min,
+            max_deviation_pct=settings.alert_max_deviation_pct,
         ),
         wallet_service=WalletScanService(db_factory=AsyncSessionLocal, solana=solana_adapter, tron=tron_adapter, price=price_adapter),
         trade_verify_service=TradeVerifyService(ohlcv_adapter),
@@ -135,7 +191,7 @@ def build_hub(settings: Settings, bot: Bot, cache: RedisCache, http: ResilientHT
         watchlist_service=WatchlistService(
             http=http,
             news_adapter=news_adapter,
-            binance_base=settings.binance_base_url,
+            market_router=market_router,
             coingecko_base=settings.coingecko_base_url,
             include_btc_eth=settings.include_btc_eth_watchlist,
         ),
@@ -143,6 +199,9 @@ def build_hub(settings: Settings, bot: Bot, cache: RedisCache, http: ResilientHT
         cycles_service=CyclesService(ohlcv_adapter),
         correlation_service=CorrelationService(ohlcv_adapter, price_adapter),
         rsi_scanner_service=rsi_scanner_service,
+        ema_scanner_service=ema_scanner_service,
+        chart_service=chart_service,
+        orderbook_heatmap_service=orderbook_heatmap_service,
         discovery_service=discovery_service,
         giveaway_service=giveaway_service,
     )
@@ -286,10 +345,17 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=401, detail="Unauthorized")
 
         async def _notify(chat_id: int, text: str) -> None:
-            await app.state.bot.send_message(chat_id=chat_id, text=text)
+            try:
+                await app.state.bot.send_message(chat_id=chat_id, text=text)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("task_alert_notify_failed", extra={"event": "task_alert_notify_failed", "chat_id": chat_id, "error": str(exc)})
 
-        count = await app.state.hub.alerts_service.process_alerts(_notify)
-        return {"ok": True, "processed": count, "task": "alerts", "ts": datetime.now(timezone.utc).isoformat()}
+        try:
+            count = await app.state.hub.alerts_service.process_alerts(_notify)
+            return {"ok": True, "processed": count, "task": "alerts", "ts": datetime.now(timezone.utc).isoformat()}
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("task_alerts_failed", extra={"event": "task_alerts_failed", "error": str(exc)})
+            return {"ok": False, "processed": 0, "task": "alerts", "error": str(exc), "ts": datetime.now(timezone.utc).isoformat()}
 
     @app.api_route("/tasks/giveaways/run", methods=["GET", "POST"])
     async def task_giveaways(req: Request) -> dict:
@@ -297,18 +363,29 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=401, detail="Unauthorized")
 
         async def _notify(chat_id: int, text: str) -> None:
-            await app.state.bot.send_message(chat_id=chat_id, text=text)
+            try:
+                await app.state.bot.send_message(chat_id=chat_id, text=text)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("task_giveaway_notify_failed", extra={"event": "task_giveaway_notify_failed", "chat_id": chat_id, "error": str(exc)})
 
-        count = await app.state.hub.giveaway_service.process_due_giveaways(_notify)
-        return {"ok": True, "processed": count, "task": "giveaways", "ts": datetime.now(timezone.utc).isoformat()}
+        try:
+            count = await app.state.hub.giveaway_service.process_due_giveaways(_notify)
+            return {"ok": True, "processed": count, "task": "giveaways", "ts": datetime.now(timezone.utc).isoformat()}
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("task_giveaways_failed", extra={"event": "task_giveaways_failed", "error": str(exc)})
+            return {"ok": False, "processed": 0, "task": "giveaways", "error": str(exc), "ts": datetime.now(timezone.utc).isoformat()}
 
     @app.api_route("/tasks/news/warm", methods=["GET", "POST"])
     async def task_news(req: Request) -> dict:
         if not _cron_authorized(req):
             raise HTTPException(status_code=401, detail="Unauthorized")
 
-        await app.state.hub.news_service.get_daily_brief(limit=10)
-        return {"ok": True, "task": "news", "ts": datetime.now(timezone.utc).isoformat()}
+        try:
+            await app.state.hub.news_service.get_daily_brief(limit=10)
+            return {"ok": True, "task": "news", "ts": datetime.now(timezone.utc).isoformat()}
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("task_news_failed", extra={"event": "task_news_failed", "error": str(exc)})
+            return {"ok": False, "task": "news", "error": str(exc), "ts": datetime.now(timezone.utc).isoformat()}
 
     @app.api_route("/tasks/rsi/refresh", methods=["GET", "POST"])
     async def task_rsi_refresh(req: Request) -> dict:
@@ -316,9 +393,22 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=401, detail="Unauthorized")
 
         force = str(req.query_params.get("force", "")).lower() in {"1", "true", "yes"}
-        await app.state.hub.rsi_scanner_service.refresh_universe(app.state.settings.rsi_scan_universe_size)
-        payload = await app.state.hub.rsi_scanner_service.refresh_indicators(force=force)
-        return {"ok": True, "task": "rsi_refresh", "force": force, **payload}
+        try:
+            universe = await app.state.hub.rsi_scanner_service.refresh_universe(app.state.settings.rsi_scan_universe_size)
+            payload = await app.state.hub.rsi_scanner_service.refresh_indicators(force=force)
+            return {"ok": True, "task": "rsi_refresh", "force": force, "universe": universe, **payload}
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("task_rsi_refresh_failed", extra={"event": "task_rsi_refresh_failed", "error": str(exc)})
+            return {
+                "ok": False,
+                "task": "rsi_refresh",
+                "force": force,
+                "updated": 0,
+                "timeframes": [],
+                "symbols": 0,
+                "error": str(exc),
+                "ts": datetime.now(timezone.utc).isoformat(),
+            }
 
     return app
 

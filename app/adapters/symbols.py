@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 
 
 @dataclass
@@ -29,7 +30,16 @@ COINGECKO_MAP = {
 
 
 def normalize_symbol(symbol: str) -> SymbolMeta:
-    s = symbol.strip().upper()
+    raw = str(symbol or "").strip().upper()
+    s = raw.replace("$", "")
+    s = re.sub(r"\s+", "", s)
+    s = s.replace("_", "/").replace("-", "/")
+    if "/" in s:
+        left, right = s.split("/", 1)
+        if left:
+            s = left
+        if right in {"USD", "USDT", "USDC", "BUSD"}:
+            pass
     aliases = {
         "XBT": "BTC",
         "BITCOIN": "BTC",
@@ -37,6 +47,14 @@ def normalize_symbol(symbol: str) -> SymbolMeta:
         "SOLANA": "SOL",
     }
     s = aliases.get(s, s)
+    if s.endswith(("USDT", "USDC", "USD", "BUSD")):
+        for q in ("USDT", "USDC", "USD", "BUSD"):
+            if s.endswith(q):
+                s = s[: -len(q)]
+                break
+    s = re.sub(r"[^A-Z0-9]", "", s)
+    if not s:
+        s = raw.strip().upper().replace("$", "")
     if s.endswith("USDT"):
         s = s[:-4]
     return SymbolMeta(input_symbol=symbol, base=s)

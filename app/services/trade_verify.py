@@ -27,6 +27,7 @@ class TradeVerifyService:
         df = pd.DataFrame(candles)
         if df.empty:
             raise RuntimeError("No candles available")
+        source_line = str(candles[-1].get("source_line") or "") if candles else ""
 
         ts_ms = int(timestamp.astimezone(timezone.utc).timestamp() * 1000)
         active = df[df["ts"] >= ts_ms].copy()
@@ -121,4 +122,5 @@ class TradeVerifyService:
             "r_multiple": round(r_multiple, 3),
             "mode": mode,
             "evaluated_until": int((timestamp + timedelta(hours=window_hours)).timestamp() * 1000),
+            "source_line": source_line,
         }

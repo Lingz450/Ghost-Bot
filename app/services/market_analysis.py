@@ -137,7 +137,7 @@ class MarketAnalysisService:
         if all_rsis:
             rsi_set = ALL_RSI_PERIODS.copy()
         elif rsi_periods:
-            rsi_set = sorted({int(p) for p in rsi_periods if 2 <= int(p) <= 500})
+            rsi_set = sorted({int(p) for p in rsi_periods if 2 <= int(p) <= 50})
         else:
             rsi_set = DEFAULT_RSI_PERIODS.copy()
         if len(rsi_set) > MAX_RSI_PERIODS:
@@ -224,6 +224,13 @@ class MarketAnalysisService:
         higher_tf = "4h" if "4h" in frames else sorted_tfs[-1]
 
         current = float(price["price"])
+        data_source_line = price.get("source_line")
+        if not data_source_line:
+            for tf in sorted_tfs:
+                rows = frames[tf].to_dict("records")
+                if rows and rows[-1].get("source_line"):
+                    data_source_line = rows[-1].get("source_line")
+                    break
 
         rsi_primary_period = 14 if 14 in rsi_set else rsi_set[0]
         ema_anchor_period = 20 if 20 in ema_set else ema_set[0]
@@ -333,6 +340,7 @@ class MarketAnalysisService:
             "condition": condition,
             "price": current,
             "price_source": price["source"],
+            "data_source_line": data_source_line,
             "updated_at": price["ts"],
             "risk": "Not financial advice. Use sizing and stop discipline.",
             "mtf_snapshot": mtf_snapshot,

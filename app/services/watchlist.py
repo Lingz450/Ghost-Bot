@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from app.adapters.market_router import MarketDataRouter
 from app.adapters.news_sources import NewsSourcesAdapter
 from app.core.http import ResilientHTTPClient
 
@@ -11,32 +12,32 @@ class WatchlistService:
         self,
         http: ResilientHTTPClient,
         news_adapter: NewsSourcesAdapter,
-        binance_base: str,
+        market_router: MarketDataRouter,
         coingecko_base: str,
         include_btc_eth: bool = True,
     ) -> None:
         self.http = http
         self.news_adapter = news_adapter
-        self.binance_base = binance_base
+        self.market_router = market_router
         self.coingecko_base = coingecko_base
         self.include_btc_eth = include_btc_eth
 
     async def _top_movers(self, direction: str | None = None) -> list[dict]:
         filtered = []
         try:
-            rows = await self.http.get_json(f"{self.binance_base}/api/v3/ticker/24hr")
+            rows = await self.market_router.get_spot_movers()
             for row in rows:
-                sym = row.get("symbol", "")
-                if not sym.endswith("USDT"):
-                    continue
-                quote_volume = float(row.get("quoteVolume", 0) or 0)
+                sym = str(row.get("symbol", "")).upper()
+                quote_volume = float(row.get("quote_volume", 0) or 0)
                 if quote_volume < 5_000_000:
                     continue
                 filtered.append(
                     {
-                        "symbol": sym.replace("USDT", ""),
-                        "change": float(row.get("priceChangePercent", 0) or 0),
+                        "symbol": sym,
+                        "change": float(row.get("change", 0) or 0),
                         "volume": quote_volume,
+                        "exchange": row.get("exchange"),
+                        "instrument_id": row.get("instrument_id"),
                     }
                 )
             if direction == "short":
@@ -119,5 +120,6 @@ class WatchlistService:
             "summary": " ".join(themes),
             "items": items,
             "direction": direction,
+            "source_line": "Data source: multi-exchange spot router | Updated: just now",
             "updated_at": datetime.utcnow().isoformat(),
         }

@@ -36,6 +36,9 @@ class CorrelationService:
         perf_b = float((dfb["close"].iloc[-1] / dfb["close"].iloc[0] - 1) * 100)
 
         verdict = "Yes, mostly tracking BTC." if corr >= 0.65 else "Not tightly tracking BTC right now."
+        source_line = ""
+        if a:
+            source_line = str(a[-1].get("source_line") or "")
 
         return {
             "summary": f"{verdict} Corr(48x1h)={corr:.2f}, beta={beta:.2f}.",
@@ -46,4 +49,5 @@ class CorrelationService:
             ],
             "corr": corr,
             "beta": beta,
+            "source_line": source_line,
         }

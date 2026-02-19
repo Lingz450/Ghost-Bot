@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 from openai import AsyncOpenAI
+from pydantic import BaseModel, Field, ValidationError
 
 GHOST_ALPHA_SYSTEM = """You are Ghost Alpha Bot.
 
@@ -27,10 +28,10 @@ Return ONLY valid JSON. No markdown. No extra text.
 Given the user's message, produce:
 {
   "intent": one of [
-    "smalltalk","news_digest","watch_asset","market_analysis","watchlist","rsi_scan",
+    "smalltalk","news_digest","watch_asset","market_analysis","watchlist","rsi_scan","ema_scan","chart","heatmap",
     "alert_create","alert_list","alert_delete","alert_clear",
-    "pair_find","price_guess","setup_review",
-    "giveaway_start","giveaway_join","giveaway_end","giveaway_reroll","giveaway_status",
+    "pair_find","price_guess","setup_review","trade_math",
+    "giveaway_start","giveaway_join","giveaway_end","giveaway_reroll","giveaway_status","giveaway_cancel",
     "general_chat"
   ],
   "confidence": 0.0-1.0,
@@ -44,8 +45,12 @@ Rules:
 - If user says "watch btc" or "btc 4h", set intent="watch_asset" with {"symbol":"BTC","timeframe":"4h"} (default timeframe "1h" if missing).
 - If user says "<symbol> long/short", set intent="market_analysis" with {"symbol":"<symbol>","side":"long|short"} and optional timeframe.
 - If user asks for "coins to watch", "coins to short", or "coins to long", set intent="watchlist" with params {"count":5, "direction":"short|long"} as applicable.
+- If user asks for "ema 200 4h top 10" or "coins near ema200", set intent="ema_scan" with {"ema_length":200,"timeframe":"4h","limit":10}.
+- If user asks for chart/candles, set intent="chart" with {"symbol":"BTC","timeframe":"1h"}.
+- If user asks for heatmap/orderbook/depth, set intent="heatmap" with {"symbol":"BTC"}.
 - If user says "alert me when X hits Y", set intent="alert_create" with {"symbol":"X","operator":">=" or "<=","price":Y}.
 - If user says "list alerts", set intent="alert_list". If "clear/reset alerts", set intent="alert_clear".
+- If user says "remove my sol alert", set intent="alert_delete" with {"symbol":"SOL"}.
 - If user asks to "find pair", use intent="pair_find". If user provides a price and asks possible coins, use "price_guess" with {"price":...,"limit":10}.
 - If user provides entry/stop/targets and optionally amount/leverage, use "setup_review".
 - If giveaway is requested, route to giveaway_* intents.
@@ -60,6 +65,9 @@ ROUTER_ALLOWED_INTENTS = {
     "market_analysis",
     "watchlist",
     "rsi_scan",
+    "ema_scan",
+    "chart",
+    "heatmap",
     "alert_create",
     "alert_list",
     "alert_delete",
@@ -67,19 +75,54 @@ ROUTER_ALLOWED_INTENTS = {
     "pair_find",
     "price_guess",
     "setup_review",
+    "trade_math",
     "giveaway_start",
     "giveaway_join",
     "giveaway_end",
     "giveaway_reroll",
     "giveaway_status",
+    "giveaway_cancel",
     "general_chat",
 }
+
+
+class RouterPayload(BaseModel):
+    intent: Literal[
+        "smalltalk",
+        "news_digest",
+        "watch_asset",
+        "market_analysis",
+        "watchlist",
+        "rsi_scan",
+        "ema_scan",
+        "chart",
+        "heatmap",
+        "alert_create",
+        "alert_list",
+        "alert_delete",
+        "alert_clear",
+        "pair_find",
+        "price_guess",
+        "setup_review",
+        "trade_math",
+        "giveaway_start",
+        "giveaway_join",
+        "giveaway_end",
+        "giveaway_reroll",
+        "giveaway_status",
+        "giveaway_cancel",
+        "general_chat",
+    ] = "general_chat"
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    params: dict[str, Any] = Field(default_factory=dict)
+    followup_question: str | None = None
 
 
 @dataclass
 class LLMClient:
     api_key: str
     model: str = "gpt-4.1-mini"
+    router_model: str | None = None
     max_output_tokens: int = 350
     temperature: float = 0.7
 
@@ -148,7 +191,7 @@ class LLMClient:
 
     async def route_message(self, user_text: str) -> dict:
         resp = await self.client.responses.create(
-            model=self.model,
+            model=self.router_model or self.model,
             input=[
                 {"role": "system", "content": ROUTER_SYSTEM},
                 {"role": "user", "content": user_text},
@@ -158,19 +201,14 @@ class LLMClient:
         )
         raw = self._extract_output_text(resp)
         payload = self._extract_json_payload(raw)
-
-        intent = str(payload.get("intent", "general_chat")).strip().lower()
-        if intent not in ROUTER_ALLOWED_INTENTS:
-            intent = "general_chat"
-
         try:
-            confidence = float(payload.get("confidence", 0.0))
-        except Exception:  # noqa: BLE001
-            confidence = 0.0
-        confidence = max(0.0, min(confidence, 1.0))
+            validated = RouterPayload.model_validate(payload)
+        except ValidationError:
+            return {"intent": "general_chat", "confidence": 0.0, "params": {}}
 
-        params = payload.get("params", {})
-        if not isinstance(params, dict):
-            params = {}
-
-        return {"intent": intent, "confidence": confidence, "params": params}
+        return {
+            "intent": validated.intent,
+            "confidence": float(validated.confidence),
+            "params": dict(validated.params),
+            "followup_question": validated.followup_question,
+        }
