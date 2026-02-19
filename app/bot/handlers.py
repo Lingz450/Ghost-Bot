@@ -1967,10 +1967,16 @@ async def route_text(message: Message) -> None:
         await message.answer("Rate limit hit. Try again in a minute.")
         return
 
+    lock = _chat_lock(chat_id)
+    if lock.locked():
+        # Avoid flooding busy notices if user sends many messages quickly.
+        if await hub.cache.set_if_absent(f"busy_notice:{chat_id}", ttl=5):
+            await message.answer("Still processing your previous request. Give me a few seconds.")
+        return
+
     start_ts = datetime.now(timezone.utc)
     stop = asyncio.Event()
     typing_task = asyncio.create_task(_typing_loop(message.bot, chat_id, stop))
-    lock = _chat_lock(chat_id)
     try:
         async with lock:
             wizard = await _wizard_get(chat_id)
