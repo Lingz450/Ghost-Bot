@@ -55,6 +55,17 @@ SMALLTALK_RE = re.compile(
     r"hi|hello|hey|yo|sup|gm|good morning|good afternoon|good evening|what's up|whats up"
     r")\b"
 )
+SMALLTALK_TYPO_RE = re.compile(
+    r"\b("
+    r"hwo|howw|hw|hru|how r u|how are u|how u doing|how ya doing|"
+    r"helo|helllo|hii|heyy"
+    r")\b",
+    re.IGNORECASE,
+)
+SMALLTALK_EXCLUDE_RE = re.compile(
+    r"\b(long|short|alert|scan|trade|entry|stop|target|cycle|watch|news|following|correlation|rsi|ema|chart|heatmap)\b",
+    re.IGNORECASE,
+)
 TIMEFRAME_TOKEN_RE = re.compile(r"\b\d+[mhdwM]\b")
 NEWS_WORD_RE = re.compile(r"\b(news|headline|headlines|update|updates|brief|digest|changelog|release)\b", re.IGNORECASE)
 MACRO_NEWS_RE = re.compile(r"\b(cpi|inflation|fomc|fed|powell|rates?|nfp|jobs?|ppi|macro)\b", re.IGNORECASE)
@@ -325,6 +336,22 @@ def _parse_periods(
     return (valid or None), all_requested, notes
 
 
+def _looks_like_smalltalk(lower: str) -> bool:
+    if SMALLTALK_EXCLUDE_RE.search(lower):
+        return False
+
+    if SMALLTALK_RE.search(lower) or SMALLTALK_TYPO_RE.search(lower):
+        return True
+
+    if re.search(r"\b(how|hwo|hw)\b.{0,16}\b(are|r)\b.{0,8}\b(you|u)\b.{0,12}\b(do|doing)\b", lower):
+        return True
+    if re.search(r"\b(how|hwo|hw)\s+(are|r)\s+(you|u)\b", lower):
+        return True
+    if re.fullmatch(r"\s*(yo+|hey+|heyy+|hii+|helo+|hello+|sup+|gm+)\s*[!?.,]*\s*", lower):
+        return True
+    return False
+
+
 def parse_ema_request(text: str) -> tuple[list[int] | None, bool, list[str]]:
     return _parse_periods(text, "ema", MAX_EMA_PERIODS, max_value=500)
 
@@ -562,10 +589,7 @@ def parse_message(text: str) -> ParsedMessage:
     if "asset unsupported" in lower or "symbol unsupported" in lower:
         return ParsedMessage(Intent.ASSET_UNSUPPORTED)
 
-    if SMALLTALK_RE.search(lower) and not re.search(
-        r"\b(long|short|alert|scan|trade|entry|stop|target|cycle|watch|news|following|correlation)\b",
-        lower,
-    ):
+    if _looks_like_smalltalk(lower):
         return ParsedMessage(Intent.SMALLTALK)
 
     if lower.startswith("/alert list") or "list alerts" in lower:
