@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import datetime, timedelta, timezone
 
 import pandas as pd
@@ -12,6 +13,8 @@ from app.core.cache import RedisCache
 from app.core.http import ResilientHTTPClient
 from app.core.ta import ema, rsi
 from app.db.models import IndicatorSnapshot, UniverseSymbol
+
+logger = logging.getLogger(__name__)
 
 
 class RSIScannerService:
@@ -57,7 +60,12 @@ class RSIScannerService:
         if cached:
             return [{"symbol": str(row["symbol"]), "quote_volume_24h": float(row["quote_volume_24h"])} for row in cached]
 
-        rows = await self.http.get_json(f"{self.binance_base}/api/v3/ticker/24hr")
+        try:
+            rows = await self.http.get_json(f"{self.binance_base}/api/v3/ticker/24hr")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("rsi_universe_fetch_failed", extra={"event": "rsi_universe_error", "error": str(exc)})
+            return await self._top_symbols_from_db(cap)
+
         scored: list[dict] = []
         for row in rows:
             symbol = str(row.get("symbol", ""))
@@ -76,9 +84,30 @@ class RSIScannerService:
         await self.cache.set_json(cache_key, symbols, ttl=180)
         return symbols
 
+    async def _top_symbols_from_db(self, cap: int) -> list[dict]:
+        async with self.db_factory() as session:
+            query = await session.execute(
+                select(UniverseSymbol.symbol, UniverseSymbol.quote_volume_24h)
+                .where(UniverseSymbol.exchange == "binance")
+                .order_by(UniverseSymbol.rank.asc())
+                .limit(cap)
+            )
+            rows = query.all()
+        return [
+            {"symbol": str(symbol).upper(), "quote_volume_24h": float(quote_vol or 0.0)}
+            for symbol, quote_vol in rows
+        ]
+
     async def refresh_universe(self, universe_size: int | None = None) -> dict:
         cap = max(20, min(int(universe_size or self.universe_size), 1000))
         ranked = await self._top_usdt_symbols(cap)
+        if not ranked:
+            return {
+                "symbols": 0,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+                "skipped": True,
+                "reason": "universe_unavailable",
+            }
         now = datetime.now(timezone.utc)
         rows = []
         for idx, row in enumerate(ranked, start=1):
@@ -297,6 +326,7 @@ class RSIScannerService:
         tf = timeframe or "1h"
         mode_norm = "overbought" if mode.lower() == "overbought" else "oversold"
         cap = max(1, min(limit, 20))
+        rsi_length = max(2, min(int(rsi_length), 50))
         source = "precomputed"
 
         if symbol:
@@ -308,8 +338,14 @@ class RSIScannerService:
             if rsi_length == 14 and tf in self.scan_timeframes:
                 items = await self._query_precomputed(tf, mode_norm, cap)
                 if len(items) < max(3, cap // 2):
-                    await self.refresh_universe(self.universe_size)
-                    await self.refresh_indicators(timeframes=[tf], universe_size=self.universe_size, force=True)
+                    try:
+                        await self.refresh_universe(self.universe_size)
+                        await self.refresh_indicators(timeframes=[tf], universe_size=self.universe_size, force=True)
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning(
+                            "rsi_precompute_refresh_failed",
+                            extra={"event": "rsi_refresh_fallback", "timeframe": tf, "error": str(exc)},
+                        )
                     items = await self._query_precomputed(tf, mode_norm, cap)
             if not items:
                 items = await self._scan_live_universe(tf, mode_norm, cap, rsi_length)
