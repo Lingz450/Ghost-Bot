@@ -73,6 +73,21 @@ def _chat_lock(chat_id: int) -> asyncio.Lock:
     return lock
 
 
+async def _acquire_message_once(message: Message, ttl: int = 60 * 60 * 6) -> bool:
+    hub = _require_hub()
+    key = f"seen:message:{message.chat.id}:{message.message_id}"
+    return await hub.cache.set_if_absent(key, ttl=ttl)
+
+
+async def _acquire_callback_once(callback: CallbackQuery, ttl: int = 60 * 30) -> bool:
+    hub = _require_hub()
+    cb_id = (callback.id or "").strip()
+    if not cb_id:
+        return True
+    key = f"seen:callback:{cb_id}"
+    return await hub.cache.set_if_absent(key, ttl=ttl)
+
+
 async def _typing_loop(bot, chat_id: int, stop: asyncio.Event) -> None:
     while not stop.is_set():
         with suppress(Exception):
@@ -1624,6 +1639,11 @@ async def giveaway_cmd(message: Message) -> None:
 
 @router.callback_query(F.data.startswith("settings:"))
 async def settings_callbacks(callback: CallbackQuery) -> None:
+    if not await _acquire_callback_once(callback):
+        with suppress(Exception):
+            await callback.answer()
+        return
+
     hub = _require_hub()
     data = callback.data or ""
     chat_id = callback.message.chat.id
@@ -1647,6 +1667,11 @@ async def settings_callbacks(callback: CallbackQuery) -> None:
 
 @router.callback_query(F.data.startswith("set_alert:"))
 async def set_alert_callback(callback: CallbackQuery) -> None:
+    if not await _acquire_callback_once(callback):
+        with suppress(Exception):
+            await callback.answer()
+        return
+
     symbol = (callback.data or "").split(":", 1)[1]
     await _set_pending_alert(callback.message.chat.id, symbol)
     await callback.message.answer(f"Send alert level for {symbol}, e.g. {symbol} 100")
@@ -1655,6 +1680,11 @@ async def set_alert_callback(callback: CallbackQuery) -> None:
 
 @router.callback_query(F.data.startswith("show_levels:"))
 async def show_levels_callback(callback: CallbackQuery) -> None:
+    if not await _acquire_callback_once(callback):
+        with suppress(Exception):
+            await callback.answer()
+        return
+
     hub = _require_hub()
     symbol = (callback.data or "").split(":", 1)[1]
     payload = await hub.cache.get_json(f"last_analysis:{callback.message.chat.id}:{symbol}")
@@ -1669,6 +1699,11 @@ async def show_levels_callback(callback: CallbackQuery) -> None:
 
 @router.callback_query(F.data.startswith("why:"))
 async def why_callback(callback: CallbackQuery) -> None:
+    if not await _acquire_callback_once(callback):
+        with suppress(Exception):
+            await callback.answer()
+        return
+
     hub = _require_hub()
     symbol = (callback.data or "").split(":", 1)[1]
     payload = await hub.cache.get_json(f"last_analysis:{callback.message.chat.id}:{symbol}")
@@ -1682,6 +1717,11 @@ async def why_callback(callback: CallbackQuery) -> None:
 
 @router.callback_query(F.data.startswith("refresh:"))
 async def refresh_callback(callback: CallbackQuery) -> None:
+    if not await _acquire_callback_once(callback):
+        with suppress(Exception):
+            await callback.answer()
+        return
+
     chat_id = callback.message.chat.id
 
     async def _run() -> None:
@@ -1711,6 +1751,11 @@ async def refresh_callback(callback: CallbackQuery) -> None:
 
 @router.callback_query(F.data.startswith("details:"))
 async def details_callback(callback: CallbackQuery) -> None:
+    if not await _acquire_callback_once(callback):
+        with suppress(Exception):
+            await callback.answer()
+        return
+
     chat_id = callback.message.chat.id
 
     async def _run() -> None:
@@ -1740,6 +1785,11 @@ async def details_callback(callback: CallbackQuery) -> None:
 
 @router.callback_query(F.data.startswith("derivatives:"))
 async def derivatives_callback(callback: CallbackQuery) -> None:
+    if not await _acquire_callback_once(callback):
+        with suppress(Exception):
+            await callback.answer()
+        return
+
     chat_id = callback.message.chat.id
 
     async def _run() -> None:
@@ -1764,6 +1814,11 @@ async def derivatives_callback(callback: CallbackQuery) -> None:
 
 @router.callback_query(F.data.startswith("catalysts:"))
 async def catalysts_callback(callback: CallbackQuery) -> None:
+    if not await _acquire_callback_once(callback):
+        with suppress(Exception):
+            await callback.answer()
+        return
+
     chat_id = callback.message.chat.id
 
     async def _run() -> None:
@@ -1786,6 +1841,11 @@ async def catalysts_callback(callback: CallbackQuery) -> None:
 
 @router.callback_query(F.data.startswith("backtest:"))
 async def backtest_callback(callback: CallbackQuery) -> None:
+    if not await _acquire_callback_once(callback):
+        with suppress(Exception):
+            await callback.answer()
+        return
+
     symbol = (callback.data or "").split(":", 1)[1]
     await callback.message.answer(
         f"Send trade details like: check this trade from yesterday: {symbol} entry 2100 stop 2060 targets 2140 2180 timeframe 1h"
@@ -1795,6 +1855,11 @@ async def backtest_callback(callback: CallbackQuery) -> None:
 
 @router.callback_query(F.data.startswith("save_wallet:"))
 async def save_wallet_callback(callback: CallbackQuery) -> None:
+    if not await _acquire_callback_once(callback):
+        with suppress(Exception):
+            await callback.answer()
+        return
+
     chat_id = callback.message.chat.id
 
     async def _run() -> None:
@@ -1808,6 +1873,11 @@ async def save_wallet_callback(callback: CallbackQuery) -> None:
 
 @router.callback_query(F.data.startswith("quick:analysis:"))
 async def quick_analysis_callback(callback: CallbackQuery) -> None:
+    if not await _acquire_callback_once(callback):
+        with suppress(Exception):
+            await callback.answer()
+        return
+
     chat_id = callback.message.chat.id
 
     async def _run() -> None:
@@ -1880,6 +1950,17 @@ async def route_text(message: Message) -> None:
 
     if _is_source_query(text):
         await message.answer(await _source_reply_for_chat(chat_id, text))
+        return
+
+    if not await _acquire_message_once(message):
+        logger.info(
+            "duplicate_message_ignored",
+            extra={
+                "event": "duplicate_message_ignored",
+                "chat_id": chat_id,
+                "message_id": message.message_id,
+            },
+        )
         return
 
     if not await _check_req_limit(chat_id):
