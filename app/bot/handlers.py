@@ -1777,7 +1777,7 @@ async def details_callback(callback: CallbackQuery) -> None:
             symbol=symbol,
             context="analysis",
         )
-        await callback.message.answer(trade_plan_template(payload, settings), reply_markup=analysis_actions(symbol))
+        await callback.message.answer(trade_plan_template(payload, settings, detailed=True), reply_markup=analysis_actions(symbol))
         await callback.answer("Detailed mode")
 
     await _run_with_typing_lock(callback.bot, chat_id, _run)

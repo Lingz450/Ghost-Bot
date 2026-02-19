@@ -86,7 +86,7 @@ def _render_summary(summary: str, settings: dict) -> str:
     return f"{_style_prefix(settings)}{text}"
 
 
-def trade_plan_template(plan: dict, settings: dict) -> str:
+def trade_plan_template(plan: dict, settings: dict, detailed: bool = False) -> str:
     tone = _tone_mode(settings)
     if tone == "wild":
         ack = _pick(WILD_ACKS)
@@ -101,35 +101,37 @@ def trade_plan_template(plan: dict, settings: dict) -> str:
         warning = "Manage risk and respect invalidation."
         closer = ""
 
-    lines = [
-        *( [ack] if ack else [] ),
-        _render_summary(plan["summary"], settings),
-        f"{plan['condition']}.",
-        "",
-        "Entry: " + plan["entry"],
-        "TP1: " + plan["tp1"],
-        "TP2: " + plan["tp2"],
-        "SL: " + plan["sl"],
-        "",
-    ]
-    for bullet in plan["why"]:
+    lines = [*( [ack] if ack else [] ), _render_summary(plan["summary"], settings), ""]
+    lines.extend(
+        [
+            "Entry: " + plan["entry"],
+            "TP1: " + plan["tp1"],
+            "TP2: " + plan["tp2"],
+            "SL: " + plan["sl"],
+            "",
+        ]
+    )
+
+    why_items = plan.get("why", [])
+    for bullet in (why_items if detailed else why_items[:2]):
         lines.append(f"- {bullet}")
 
-    if plan.get("mtf_snapshot"):
+    if detailed and plan.get("mtf_snapshot"):
         lines.append("")
         lines.append("MTF snapshot:")
         for row in plan["mtf_snapshot"][:4]:
             lines.append(f"- {row}")
 
-    if plan.get("input_notes"):
+    if detailed and plan.get("input_notes"):
         lines.append("")
         for note in plan["input_notes"][:3]:
             lines.append(f"Note: {note}")
 
-    updated = plan.get("updated_at")
-    if updated:
-        lines.append("")
-        lines.append(f"Updated: {relative_updated(updated) or updated}")
+    if detailed:
+        updated = plan.get("updated_at")
+        if updated:
+            lines.append("")
+            lines.append(f"Updated: {relative_updated(updated) or updated}")
 
     lines.append(warning)
     if closer:
