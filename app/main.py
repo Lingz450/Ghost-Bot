@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 
 from aiogram import Bot, Dispatcher
-from aiogram.types import Update
+from aiogram.types import BotCommand, Update
 from fastapi import FastAPI, HTTPException, Request
 from sqlalchemy import text
 
@@ -47,6 +47,43 @@ from app.services.watchlist import WatchlistService
 from app.workers.scheduler import WorkerScheduler
 
 logger = logging.getLogger(__name__)
+
+
+async def _sync_bot_commands(bot: Bot) -> None:
+    command_specs = [
+        ("admins", "Show bot admins"),
+        ("alert", "Create a price alert"),
+        ("alertclear", "Clear alerts (all or by symbol)"),
+        ("alertdel", "Delete one alert by ID"),
+        ("alerts", "List your active alerts"),
+        ("alpha", "Full market analysis (multi-timeframe)"),
+        ("chart", "Send candlestick chart image"),
+        ("cycle", "Cycle check"),
+        ("ema", "EMA scan (near EMA levels)"),
+        ("findpair", "Find coin by price / partial name"),
+        ("giveaway", "Admin: start/end/reroll giveaways"),
+        ("heatmap", "Orderbook heatmap snapshot"),
+        ("help", "Show examples + what I can do"),
+        ("id", "Show your user/chat id"),
+        ("join", "Join active giveaway"),
+        ("margin", "Position size + margin calculator"),
+        ("news", "Crypto + macro + OpenAI news digest"),
+        ("pnl", "PnL calculator (entry/exit/size/lev)"),
+        ("price", "Latest price + 24h stats"),
+        ("rsi", "RSI scan (overbought/oversold)"),
+        ("scan", "Wallet scan (solana/tron address)"),
+        ("settings", "Preferences (default TF, risk, etc.)"),
+        ("setup", "RR + PnL + margin from entry/SL/TP"),
+        ("start", "Start the bot / show quick intro"),
+        ("tradecheck", "Verify trade outcome from timestamp"),
+        ("watch", "Quick levels + bias for a coin"),
+        ("watchlist", "Coins to watch list"),
+    ]
+    commands = [
+        BotCommand(command=command, description=description)
+        for command, description in sorted(command_specs, key=lambda x: x[0])
+    ]
+    await bot.set_my_commands(commands)
 
 
 def build_hub(settings: Settings, bot: Bot, cache: RedisCache, http: ResilientHTTPClient) -> ServiceHub:
@@ -227,6 +264,11 @@ async def lifespan(app: FastAPI):
         hub.bot_username = me.username.lower() if me.username else None
     except Exception:  # noqa: BLE001
         hub.bot_username = None
+
+    try:
+        await _sync_bot_commands(bot)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("set_bot_commands_failed", extra={"event": "set_bot_commands_failed", "error": str(exc)})
     init_handlers(hub)
     dp.include_router(router)
 

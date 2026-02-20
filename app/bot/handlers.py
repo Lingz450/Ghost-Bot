@@ -1480,6 +1480,17 @@ async def help_cmd(message: Message) -> None:
     await message.answer(help_text(), reply_markup=command_center_menu())
 
 
+@router.message(Command("admins"))
+async def admins_cmd(message: Message) -> None:
+    admin_ids = sorted(set(_settings.admin_ids_list()))
+    if not admin_ids:
+        await message.answer("No admin IDs configured.")
+        return
+    lines = ["Bot admins:"]
+    lines.extend(f"- {admin_id}" for admin_id in admin_ids)
+    await message.answer("\n".join(lines))
+
+
 @router.message(Command("id"))
 async def id_cmd(message: Message) -> None:
     if not message.from_user:
@@ -1519,6 +1530,17 @@ async def watch_cmd(message: Message) -> None:
     text = args.strip()
     if not text:
         await message.answer("Pick a watch shortcut or tap Custom.", reply_markup=watch_quick_menu())
+        return
+    await _dispatch_command_text(message, f"watch {text}")
+
+
+@router.message(Command("price"))
+async def price_cmd(message: Message) -> None:
+    raw = (message.text or "").strip()
+    args = raw.split(maxsplit=1)[1] if len(raw.split(maxsplit=1)) > 1 else ""
+    text = args.strip()
+    if not text:
+        await message.answer("Usage: /price <symbol> [tf]\nExample: /price SOL 1h")
         return
     await _dispatch_command_text(message, f"watch {text}")
 
@@ -1841,6 +1863,34 @@ async def setup_cmd(message: Message) -> None:
         await message.answer("Choose setup input mode.", reply_markup=setup_quick_menu())
         return
     await _dispatch_command_text(message, args.strip())
+
+
+@router.message(Command("margin"))
+async def margin_cmd(message: Message) -> None:
+    raw = (message.text or "").strip()
+    args = raw.split(maxsplit=1)[1] if len(raw.split(maxsplit=1)) > 1 else ""
+    text = args.strip()
+    if not text:
+        await message.answer(
+            "Usage: /margin <setup text>\n"
+            "Example: /margin long BTC entry 66300 stop 64990 targets 69200 72000 margin 200 leverage 5"
+        )
+        return
+    await _dispatch_command_text(message, text)
+
+
+@router.message(Command("pnl"))
+async def pnl_cmd(message: Message) -> None:
+    raw = (message.text or "").strip()
+    args = raw.split(maxsplit=1)[1] if len(raw.split(maxsplit=1)) > 1 else ""
+    text = args.strip()
+    if not text:
+        await message.answer(
+            "Usage: /pnl <setup text>\n"
+            "Example: /pnl long ETH entry 2100 stop 2050 targets 2200 2300 amount 100 leverage 10"
+        )
+        return
+    await _dispatch_command_text(message, text)
 
 
 @router.message(Command("join"))
