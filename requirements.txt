@@ -18,5 +18,5 @@ pytest==8.3.4
 pytest-asyncio==0.24.0
 respx==0.22.0
 openai>=1.0.0
-litellm>=1.55.0
+litellm==1.40.0
 Pillow==11.0.0

@@ -185,6 +185,7 @@ class LLMClient:
             "max_tokens": max_tokens,
             "temperature": temperature,
             "api_key": api_key or self.api_key,
+            "request_timeout": 10,  # fail fast — Vercel has a 30s function limit
         }
         if base_url:
             kwargs["base_url"] = base_url
