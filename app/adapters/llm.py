@@ -146,7 +146,7 @@ class RouterPayload(BaseModel):
 @dataclass
 class LLMClient:
     api_key: str                          # Primary provider API key (Claude)
-    model: str = "anthropic/claude-haiku-3-5"  # Primary model
+    model: str = "anthropic/claude-3-5-haiku-20241022"  # Primary model
     router_model: str | None = None       # Model used for intent routing (defaults to model)
     max_output_tokens: int = 350
     temperature: float = 0.7
@@ -185,7 +185,7 @@ class LLMClient:
             "max_tokens": max_tokens,
             "temperature": temperature,
             "api_key": api_key or self.api_key,
-            "request_timeout": 10,  # fail fast — Vercel has a 30s function limit
+            "timeout": 10,  # fail fast — Vercel has a 30s function limit
         }
         if base_url:
             kwargs["base_url"] = base_url

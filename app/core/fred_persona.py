@@ -65,7 +65,7 @@ Raw data:
                 temperature=0.85,
                 max_tokens=850,
                 api_key=self.claude_key,
-                request_timeout=20,
+                timeout=20,
             )
             return response.choices[0].message.content.strip()
 
@@ -84,7 +84,7 @@ Raw data:
                 max_tokens=800,
                 api_key=self.grok_key,
                 base_url="https://api.x.ai/v1",
-                request_timeout=20,
+                timeout=20,
             )
             return response.choices[0].message.content.strip()
 
