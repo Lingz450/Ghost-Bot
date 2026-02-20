@@ -363,63 +363,95 @@ def price_guess_template(payload: dict) -> str:
     return "\n".join(lines)
 
 
+def _fmt_price(v: object) -> str:
+    """Format a price value cleanly (strip trailing zeros)."""
+    try:
+        f = float(str(v))
+    except (TypeError, ValueError):
+        return str(v)
+    if abs(f) >= 1:
+        return f"{f:.4f}".rstrip("0").rstrip(".")
+    return f"{f:.8f}".rstrip("0").rstrip(".")
+
+
 def setup_review_template(payload: dict, settings: dict) -> str:
     tone = _tone_mode(settings)
-    symbol = safe_html(str(payload.get("symbol", "")))
+    symbol    = safe_html(str(payload.get("symbol", "")))
     direction = safe_html(str(payload.get("direction", "")))
-    verdict = safe_html(str(payload.get("verdict", "")).upper())
+    verdict   = safe_html(str(payload.get("verdict", "")).upper())
+    tf        = safe_html(str(payload.get("timeframe", "1h")))
 
     if tone == "wild":
-        opener = "I see the level. Here's where it breaks."
+        opener = "i see the level. here's where it breaks."
     elif tone == "standard":
         opener = "Setup review complete."
     else:
         opener = "Setup review completed."
 
-    entry = safe_html(str(payload.get("entry", "")))
-    stop = safe_html(str(payload.get("stop", "")))
-    targets = ", ".join(safe_html(str(x)) for x in payload.get("targets", []))
-    rr_first = safe_html(str(payload.get("rr_first", "")))
-    rr_best = safe_html(str(payload.get("rr_best", "")))
-    stop_atr = safe_html(str(payload.get("stop_atr", "")))
-    entry_ctx = safe_html(str(payload.get("entry_context", "")))
-    stop_note = safe_html(str(payload.get("stop_note", "")))
-    risk_line = safe_html(str(payload.get("risk_line", "")))
+    entry_val  = _fmt_price(payload.get("entry", ""))
+    stop_val   = _fmt_price(payload.get("stop", ""))
+    targets    = payload.get("targets", [])
+    rr_first   = safe_html(str(payload.get("rr_first", "")))
+    rr_best    = safe_html(str(payload.get("rr_best", "")))
+    stop_atr   = safe_html(str(payload.get("stop_atr", "")))
+    entry_ctx  = safe_html(str(payload.get("entry_context", "")))
+    stop_note  = safe_html(str(payload.get("stop_note", "")))
+    risk_line  = safe_html(str(payload.get("risk_line", "")))
+
+    # Build targets line with TP labels
+    target_lines: list[str] = []
+    for i, t in enumerate(targets, 1):
+        target_lines.append(f"tp{i}: <b>${safe_html(_fmt_price(t))}</b>")
 
     sug = payload.get("suggested", {})
+
+    def _sug_line(key: str, label: str) -> str:
+        val  = _fmt_price(sug.get(key, ""))
+        why  = safe_html(str(sug.get(f"{key}_why", "")))
+        if why:
+            return f"  {label}:  <b>${val}</b>  <i>({why})</i>"
+        return f"  {label}:  <b>${val}</b>"
+
     lines = [
         f"<b>{symbol} {direction} — {verdict}</b>",
         f"<i>{opener}</i>",
         "",
-        f"• <b>entry</b>    {entry}",
-        f"• <b>stop</b>     {stop}",
-        f"• <b>targets</b>  {targets}",
+        f"entry:  <b>${safe_html(entry_val)}</b>",
+        f"stop:   <b>${safe_html(stop_val)}</b>",
+    ]
+    for tl in target_lines:
+        lines.append(tl)
+
+    lines += [
         "",
-        f"R/R:  first {rr_first}R · best {rr_best}R",
-        f"ATR:  {stop_atr}",
+        f"R/R:  first <b>{rr_first}R</b>  ·  best <b>{rr_best}R</b>",
+        f"ATR ({tf}):  {stop_atr}",
         f"<i>{entry_ctx}</i>",
         f"<i>{stop_note}</i>",
         "",
-        "<b>Suggested levels:</b>",
-        f"  • entry  {safe_html(str(sug.get('entry', '')))}",
-        f"  • sl     {safe_html(str(sug.get('stop', '')))}",
-        f"  • tp1    {safe_html(str(sug.get('tp1', '')))}",
-        f"  • tp2    {safe_html(str(sug.get('tp2', '')))}",
+        "<b>fred's levels:</b>",
+        _sug_line("entry", "entry"),
+        _sug_line("stop",  "sl"),
+        _sug_line("tp1",   "tp1"),
+        _sug_line("tp2",   "tp2"),
     ]
 
     position = payload.get("position")
     if position:
         lines += [
             "",
-            "<b>Position sizing:</b>",
-            f"  Margin:    ${safe_html(str(position.get('margin_usd', '')))}",
-            f"  Leverage:  {safe_html(str(position.get('leverage', '')))}x",
-            f"  Notional:  ${safe_html(str(position.get('notional_usd', '')))}",
-            f"  Qty:       {safe_html(str(position.get('qty', '')))}",
-            f"  Stop PnL:  ${safe_html(str(position.get('stop_pnl_usd', '')))}",
+            "<b>position sizing:</b>",
+            f"  margin:    <b>${safe_html(str(position.get('margin_usd', '')))}",
+            f"  leverage:  <b>{safe_html(str(position.get('leverage', '')))}x</b>",
+            f"  notional:  <b>${safe_html(str(position.get('notional_usd', '')))}</b>",
+            f"  qty:       {safe_html(str(position.get('qty', '')))}",
+            f"  stop PnL:  <b>${safe_html(str(position.get('stop_pnl_usd', '')))}</b>",
         ]
         for row in position.get("tp_pnls", [])[:3]:
-            lines.append(f"  TP {safe_html(str(row.get('tp', '')))}: ${safe_html(str(row.get('pnl_usd', '')))}")
+            lines.append(
+                f"  tp {safe_html(_fmt_price(row.get('tp', '')))}: "
+                f"<b>${safe_html(str(row.get('pnl_usd', '')))}</b>"
+            )
 
     size_note = safe_html(str(payload.get("size_note", "")).strip())
     if size_note:

@@ -5,7 +5,28 @@ import math
 import pandas as pd
 
 from app.adapters.ohlcv import OHLCVAdapter
-from app.core.ta import atr, pivot_levels
+from app.core.ta import atr, bollinger_mid, ema, pivot_levels
+
+
+def _fmt(v: float) -> str:
+    """Format a price value: drop trailing zeros, max 8 sig figs."""
+    if v == 0:
+        return "0"
+    if abs(v) >= 1:
+        return f"{v:.4f}".rstrip("0").rstrip(".")
+    return f"{v:.8f}".rstrip("0").rstrip(".")
+
+
+def _nearest(val: float, candidates: list[tuple[float, str]], pct: float = 0.015) -> str | None:
+    """Return the label of the closest candidate within pct of val, or None."""
+    best_label = None
+    best_dist = float("inf")
+    for cv, label in candidates:
+        dist = abs(val - cv) / max(abs(cv), 1e-12)
+        if dist < pct and dist < best_dist:
+            best_dist = dist
+            best_label = label
+    return best_label
 
 
 class SetupReviewService:
@@ -20,6 +41,16 @@ class SetupReviewService:
         if math.isnan(value):
             return default
         return value
+
+    def _bollinger_bands(self, series: pd.Series, period: int = 20, std: float = 2.0) -> tuple[float, float, float]:
+        mid = series.rolling(window=period).mean()
+        dev = series.rolling(window=period).std()
+        upper = mid + std * dev
+        lower = mid - std * dev
+        m = self._safe_last(mid, float("nan"))
+        u = self._safe_last(upper, float("nan"))
+        lo = self._safe_last(lower, float("nan"))
+        return u, m, lo
 
     async def review(
         self,
@@ -62,28 +93,64 @@ class SetupReviewService:
 
         support, resistance = pivot_levels(df, lookback=80)
 
+        # --- Compute indicators for level reasoning ---
+        close = df["close"]
+        ema20_val  = self._safe_last(ema(close, 20),  float("nan"))
+        ema50_val  = self._safe_last(ema(close, 50),  float("nan"))
+        ema200_val = self._safe_last(ema(close, 200), float("nan"))
+        bb_upper, bb_mid, bb_lower = self._bollinger_bands(close, 20, 2.0)
+
+        # Recent 24-candle swing high/low (approximates daily range)
+        recent_df = df.tail(24)
+        swing_high = float(recent_df["high"].max())
+        swing_low  = float(recent_df["low"].min())
+
+        # Build named level map for proximity reasoning
+        named_levels: list[tuple[float, str]] = []
+        for v, lbl in [
+            (ema20_val,  f"{tf} ema20"),
+            (ema50_val,  f"{tf} ema50"),
+            (ema200_val, f"{tf} ema200"),
+            (bb_mid,     f"{tf} bollinger mid"),
+            (bb_upper,   f"{tf} bollinger upper"),
+            (bb_lower,   f"{tf} bollinger lower"),
+            (resistance, "resistance"),
+            (support,    "support"),
+            (swing_high, "recent swing high"),
+            (swing_low,  "recent swing low"),
+        ]:
+            if not math.isnan(v):
+                named_levels.append((v, lbl))
+
+        def _reason(price: float, fallback: str) -> str:
+            label = _nearest(price, named_levels, pct=0.025)
+            return label if label else fallback
+
+        # --- Entry context ---
         if direction == "long":
             near_level = entry <= support * 1.03
             entry_context = (
-                f"Entry is near support ({support:.4f})."
+                f"entry near support ({_fmt(support)})"
                 if near_level
-                else f"Entry is above support ({support:.4f}); possible chase risk."
+                else f"entry above support ({_fmt(support)}) — possible chase"
             )
         else:
             near_level = entry >= resistance * 0.97
             entry_context = (
-                f"Entry is near resistance ({resistance:.4f})."
+                f"entry near resistance ({_fmt(resistance)})"
                 if near_level
-                else f"Entry is below resistance ({resistance:.4f}); may be late."
+                else f"entry below resistance ({_fmt(resistance)}) — may be late"
             )
 
+        # --- Stop note ---
         if stop_atr < 0.8:
-            stop_note = f"Stop looks tight ({stop_atr:.2f} ATR) and can get hunted by noise."
+            stop_note = f"stop looks tight ({stop_atr:.2f} ATR) — noise could hunt it"
         elif stop_atr > 3.5:
-            stop_note = f"Stop is wide ({stop_atr:.2f} ATR); safer but capital inefficient."
+            stop_note = f"stop is wide ({stop_atr:.2f} ATR) — safer but capital inefficient"
         else:
-            stop_note = f"Stop distance is reasonable ({stop_atr:.2f} ATR)."
+            stop_note = f"stop distance is reasonable ({stop_atr:.2f} ATR)"
 
+        # --- Verdict score ---
         score = 0
         score += 1 if rr_first >= 1.5 else 0
         score += 1 if rr_best >= 3.0 else 0
@@ -97,17 +164,31 @@ class SetupReviewService:
         else:
             verdict = "weak"
 
+        # --- Suggested levels with reasoning ---
         if direction == "long":
             suggested_stop = min(stop, support - 0.35 * atr_val, entry - 1.2 * atr_val)
-            suggested_tp1 = max(targets[0], entry + 1.5 * risk)
-            suggested_tp2 = max(max(targets), entry + 2.8 * risk, resistance)
+            suggested_tp1  = max(targets[0], entry + 1.5 * risk)
+            suggested_tp2  = max(max(targets), entry + 2.8 * risk, resistance)
         else:
             suggested_stop = max(stop, resistance + 0.35 * atr_val, entry + 1.2 * atr_val)
-            suggested_tp1 = min(targets[0], entry - 1.5 * risk)
-            suggested_tp2 = min(min(targets), entry - 2.8 * risk, support)
+            suggested_tp1  = min(targets[0], entry - 1.5 * risk)
+            suggested_tp2  = min(min(targets), entry - 2.8 * risk, support)
 
+        # Build human reasons for each suggested level
+        if direction == "long":
+            entry_reason = _reason(entry, f"near support {_fmt(support)}")
+            stop_reason  = _reason(suggested_stop, f"below support {_fmt(support)} + ATR buffer")
+            tp1_reason   = _reason(suggested_tp1, "1.5R from entry")
+            tp2_reason   = _reason(suggested_tp2, "2.8R / near resistance")
+        else:
+            entry_reason = _reason(entry, f"near resistance {_fmt(resistance)}")
+            stop_reason  = _reason(suggested_stop, f"above resistance {_fmt(resistance)} + ATR buffer")
+            tp1_reason   = _reason(suggested_tp1, "1.5R from entry")
+            tp2_reason   = _reason(suggested_tp2, f"2.8R / near support {_fmt(support)}")
+
+        # --- Position sizing ---
         position = None
-        size_note = "R-multiples shown. Add `amount` and `leverage` for dollar PnL estimates."
+        size_note = "add `amount` and `leverage` for dollar PnL estimates"
         margin = float(amount_usd) if amount_usd is not None else None
         lev = float(leverage) if leverage is not None else None
         if margin is not None and margin <= 0:
@@ -134,9 +215,9 @@ class SetupReviewService:
                 "stop_pnl_usd": round(stop_pnl, 2),
                 "tp_pnls": tp_rows,
             }
-            size_note = "PnL estimates assume fixed position size and no fees/funding/slippage."
+            size_note = "PnL estimates assume fixed size, no fees/funding/slippage"
         elif margin is not None and lev is None:
-            size_note = "Margin captured. Add leverage (e.g. `10x`) and I will estimate dollar PnL."
+            size_note = "margin captured — add leverage (e.g. `10x`) for dollar PnL"
 
         return {
             "symbol": symbol,
@@ -155,12 +236,24 @@ class SetupReviewService:
             "entry_context": entry_context,
             "stop_note": stop_note,
             "suggested": {
-                "entry": round(entry, 6),
-                "stop": round(suggested_stop, 6),
-                "tp1": round(suggested_tp1, 6),
-                "tp2": round(suggested_tp2, 6),
+                "entry":       round(entry, 8),
+                "entry_why":   entry_reason,
+                "stop":        round(suggested_stop, 8),
+                "stop_why":    stop_reason,
+                "tp1":         round(suggested_tp1, 8),
+                "tp1_why":     tp1_reason,
+                "tp2":         round(suggested_tp2, 8),
+                "tp2_why":     tp2_reason,
+            },
+            "indicators": {
+                "ema20":    round(ema20_val, 8)  if not math.isnan(ema20_val)  else None,
+                "ema50":    round(ema50_val, 8)  if not math.isnan(ema50_val)  else None,
+                "ema200":   round(ema200_val, 8) if not math.isnan(ema200_val) else None,
+                "bb_upper": round(bb_upper, 8)   if not math.isnan(bb_upper)   else None,
+                "bb_mid":   round(bb_mid, 8)     if not math.isnan(bb_mid)     else None,
+                "bb_lower": round(bb_lower, 8)   if not math.isnan(bb_lower)   else None,
             },
             "position": position,
             "size_note": size_note,
-            "risk_line": "Use this as a risk-planning map, then execute only if structure still holds.",
+            "risk_line": "use as a risk-planning map — execute only if structure still holds",
         }
