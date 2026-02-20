@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Literal
 
-from openai import AsyncOpenAI
+from litellm import acompletion
 from pydantic import BaseModel, Field, ValidationError
 
 GHOST_ALPHA_SYSTEM = """You are Fred — a sharp, no-bullshit crypto market assistant with deep technical
@@ -145,14 +145,14 @@ class RouterPayload(BaseModel):
 
 @dataclass
 class LLMClient:
-    api_key: str
-    model: str = "gpt-4.1-mini"
-    router_model: str | None = None
+    api_key: str                          # Primary provider API key (Claude)
+    model: str = "anthropic/claude-haiku-3-5"  # Primary model
+    router_model: str | None = None       # Model used for intent routing (defaults to model)
     max_output_tokens: int = 350
     temperature: float = 0.7
-
-    def __post_init__(self) -> None:
-        self.client = AsyncOpenAI(api_key=self.api_key)
+    fallback_model: str | None = None     # Grok fallback model
+    fallback_api_key: str | None = None   # Grok API key
+    fallback_base_url: str | None = None  # Grok base URL
 
     def _extract_json_payload(self, raw_text: str) -> dict:
         text = (raw_text or "").strip()
@@ -168,6 +168,28 @@ class LLMClient:
         except json.JSONDecodeError:
             return {}
         return payload if isinstance(payload, dict) else {}
+
+    async def _call(
+        self,
+        messages: list[dict],
+        max_tokens: int,
+        temperature: float,
+        *,
+        model: str | None = None,
+        api_key: str | None = None,
+        base_url: str | None = None,
+    ) -> str:
+        kwargs: dict[str, Any] = {
+            "model": model or self.model,
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "api_key": api_key or self.api_key,
+        }
+        if base_url:
+            kwargs["base_url"] = base_url
+        resp = await acompletion(**kwargs)
+        return (resp.choices[0].message.content or "").strip()
 
     async def reply(
         self,
@@ -186,31 +208,56 @@ class LLMClient:
                 messages.append({"role": role, "content": content})
         messages.append({"role": "user", "content": user_text})
 
+        max_tok = max_output_tokens or self.max_output_tokens
+        temp = self.temperature if temperature is None else float(temperature)
+
+        # Try primary (Claude)
         try:
-            resp = await self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                max_tokens=max_output_tokens or self.max_output_tokens,
-                temperature=self.temperature if temperature is None else float(temperature),
-            )
-            text = (resp.choices[0].message.content or "").strip()
+            return await self._call(messages, max_tok, temp)
         except Exception:  # noqa: BLE001
-            text = ""
-        return text or "Signal unclear. Give me ticker + timeframe and I will map it."
+            pass
+
+        # Fallback (Grok)
+        if self.fallback_model:
+            try:
+                return await self._call(
+                    messages, max_tok, temp,
+                    model=self.fallback_model,
+                    api_key=self.fallback_api_key,
+                    base_url=self.fallback_base_url,
+                )
+            except Exception:  # noqa: BLE001
+                pass
+
+        return "Signal unclear. Give me ticker + timeframe and I will map it."
 
     async def route_message(self, user_text: str) -> dict:
+        messages = [
+            {"role": "system", "content": ROUTER_SYSTEM},
+            {"role": "user", "content": user_text},
+        ]
+        router_mod = self.router_model or self.model
+
+        # Try primary (Claude)
+        raw = ""
         try:
-            resp = await self.client.chat.completions.create(
-                model=self.router_model or self.model,
-                messages=[
-                    {"role": "system", "content": ROUTER_SYSTEM},
-                    {"role": "user", "content": user_text},
-                ],
-                max_tokens=260,
-                temperature=0.0,
-            )
-            raw = (resp.choices[0].message.content or "").strip()
+            raw = await self._call(messages, 260, 0.0, model=router_mod)
         except Exception:  # noqa: BLE001
+            pass
+
+        # Fallback (Grok)
+        if not raw and self.fallback_model:
+            try:
+                raw = await self._call(
+                    messages, 260, 0.0,
+                    model=self.fallback_model,
+                    api_key=self.fallback_api_key,
+                    base_url=self.fallback_base_url,
+                )
+            except Exception:  # noqa: BLE001
+                pass
+
+        if not raw:
             return {"intent": "general_chat", "confidence": 0.0, "params": {}}
 
         payload = self._extract_json_payload(raw)

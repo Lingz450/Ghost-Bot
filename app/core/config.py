@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     telegram_auto_set_webhook: bool = Field(default=True, alias="TELEGRAM_AUTO_SET_WEBHOOK")
     serverless_mode: bool = Field(default=False, alias="SERVERLESS_MODE")
     cron_secret: str = Field(default="", alias="CRON_SECRET")
+    # LLM providers — Claude is primary, Grok is fallback, OpenAI is last resort
+    anthropic_api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
+    xai_api_key: str = Field(default="", alias="XAI_API_KEY")
     openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
     openai_model: str = Field(default="gpt-4.1-mini", alias="OPENAI_MODEL")
     openai_router_model: str = Field(default="", alias="OPENAI_ROUTER_MODEL")

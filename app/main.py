@@ -131,7 +131,29 @@ async def _ensure_alert_schema_compat() -> None:
 def build_hub(settings: Settings, bot: Bot, cache: RedisCache, http: ResilientHTTPClient) -> ServiceHub:
     rate_limiter = RateLimiter(cache)
     llm_client = None
-    if settings.openai_api_key:
+
+    # Provider priority: Claude (paid) → Grok (paid) → OpenAI (last resort)
+    if settings.anthropic_api_key:
+        llm_client = LLMClient(
+            api_key=settings.anthropic_api_key,
+            model="anthropic/claude-haiku-3-5",
+            router_model="anthropic/claude-haiku-3-5",
+            max_output_tokens=settings.openai_max_output_tokens,
+            temperature=settings.openai_temperature,
+            fallback_model="xai/grok-3-fast-beta" if settings.xai_api_key else None,
+            fallback_api_key=settings.xai_api_key or None,
+            fallback_base_url="https://api.x.ai/v1" if settings.xai_api_key else None,
+        )
+    elif settings.xai_api_key:
+        llm_client = LLMClient(
+            api_key=settings.xai_api_key,
+            model="xai/grok-3-fast-beta",
+            router_model="xai/grok-3-fast-beta",
+            max_output_tokens=settings.openai_max_output_tokens,
+            temperature=settings.openai_temperature,
+            fallback_base_url="https://api.x.ai/v1",
+        )
+    elif settings.openai_api_key:
         llm_client = LLMClient(
             api_key=settings.openai_api_key,
             model=settings.openai_model,
