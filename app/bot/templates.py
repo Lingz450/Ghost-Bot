@@ -4,6 +4,8 @@ import random
 from datetime import datetime, timezone
 from urllib.parse import urlsplit, urlunsplit
 
+from app.core.fmt import fmt_price
+
 SMALLTALK_REPLIES = [
     "Ghost Alpha online. Scanning the tape and filtering noise. You want a setup, an alert, or a wallet scan?",
     "All systems green. Market is choppy but clean levels still print. Drop a ticker.",
@@ -90,7 +92,7 @@ def trade_plan_template(plan: dict, settings: dict, detailed: bool = False) -> s
     context = str(plan.get("market_context_text") or "").strip()
 
     if isinstance(price, (int, float)):
-        lead = f"{symbol} is around ${float(price):,.4f}. {summary}"
+        lead = f"{symbol} is around {fmt_price(float(price))}. {summary}"
     else:
         lead = summary or f"{symbol} setup mapped."
 

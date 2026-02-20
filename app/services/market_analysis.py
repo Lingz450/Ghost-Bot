@@ -8,6 +8,7 @@ import pandas as pd
 from app.adapters.derivatives import DerivativesAdapter
 from app.adapters.ohlcv import BINANCE_SUPPORTED_INTERVALS, OHLCVAdapter
 from app.adapters.prices import PriceAdapter
+from app.core.fmt import fmt_level
 from app.core.ta import atr, bollinger_mid, consolidation_zone, ema, macd, pivot_levels, rsi
 from app.services.market_context import MarketContextService, format_market_context
 from app.services.news import NewsService
@@ -291,14 +292,14 @@ class MarketAnalysisService:
             stop = min(support, entry_low) - max(atr_primary * 0.8, current * 0.008)
             tp1 = max(resistance * 0.985, current + 1.2 * atr_primary)
             tp2 = max(resistance * 1.01, current + 2.1 * atr_primary)
-            condition = f"Leaning long if {symbol} holds {entry_low:.4f}"
+            condition = f"Leaning long if {symbol} holds {fmt_level(entry_low)}"
         else:
             entry_high = min(resistance, zone_high)
             entry_low = max(zone_low, current) if current > 0 else zone_low
             stop = max(resistance, entry_high) + max(atr_primary * 0.8, current * 0.008)
             tp1 = min(support * 1.015, current - 1.2 * atr_primary)
             tp2 = min(support * 0.99, current - 2.1 * atr_primary)
-            condition = f"Leaning short if {symbol} rejects {entry_high:.4f}"
+            condition = f"Leaning short if {symbol} rejects {fmt_level(entry_high)}"
 
         ema_primary_fast = per_tf_metrics[primary_tf]["ema"][ema_anchor_period]
         ema_primary_slow = per_tf_metrics[primary_tf]["ema"][ema_secondary_period]
@@ -317,7 +318,7 @@ class MarketAnalysisService:
                 f"Momentum: RSI{rsi_primary_period} {primary_tf}={rsi_primary:.1f}, "
                 f"{higher_tf}={rsi_higher:.1f}, MACD={'up' if macd_now > macd_sig_now else 'down'}."
             ),
-            f"Structure: support {support:.4f}, resistance {resistance:.4f}, BB mid {higher_tf} {bb_mid_higher:.4f}.",
+            f"Structure: support {fmt_level(support)}, resistance {fmt_level(resistance)}, BB mid {higher_tf} {fmt_level(bb_mid_higher)}.",
         ]
 
         if include_derivatives_flag:
@@ -346,10 +347,10 @@ class MarketAnalysisService:
             "symbol": symbol,
             "side": side,
             "summary": summary,
-            "entry": f"{entry_low:.4f} - {entry_high:.4f}",
-            "tp1": f"{tp1:.4f} ({primary_tf})",
-            "tp2": f"{tp2:.4f} ({higher_tf})",
-            "sl": f"{stop:.4f}",
+            "entry": f"{fmt_level(entry_low)} - {fmt_level(entry_high)}",
+            "tp1": f"{fmt_level(tp1)} ({primary_tf})",
+            "tp2": f"{fmt_level(tp2)} ({higher_tf})",
+            "sl": f"{fmt_level(stop)}",
             "why": bullets[:5],
             "condition": condition,
             "price": current,
