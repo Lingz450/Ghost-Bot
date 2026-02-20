@@ -136,8 +136,8 @@ def build_hub(settings: Settings, bot: Bot, cache: RedisCache, http: ResilientHT
     if settings.anthropic_api_key:
         llm_client = LLMClient(
             api_key=settings.anthropic_api_key,
-            model="anthropic/claude-haiku-3-5",
-            router_model="anthropic/claude-haiku-3-5",
+            model="anthropic/claude-3-5-haiku-20241022",
+            router_model="anthropic/claude-3-5-haiku-20241022",
             max_output_tokens=settings.openai_max_output_tokens,
             temperature=settings.openai_temperature,
             fallback_model="xai/grok-3-fast-beta" if settings.xai_api_key else None,

@@ -57,7 +57,7 @@ Raw data:
         # 1. Try Claude first (best personality)
         try:
             response = await acompletion(
-                model="anthropic/claude-sonnet-4-5",
+                model="anthropic/claude-3-5-sonnet-20241022",
                 messages=[
                     {"role": "system", "content": self.SYSTEM_PROMPT},
                     {"role": "user", "content": user_message}
