@@ -3592,13 +3592,13 @@ async def route_text(message: Message) -> None:
                     "try again with a bit more detail."
                 )
                 return
-        except Exception as exc:  # noqa: BLE001
-            logger.exception(
-                "route_text_unhandled_error",
-                extra={"event": "route_text_unhandled_error", "chat_id": chat_id},
-            )
-            with suppress(Exception):
-                await message.answer(f"something broke on my end. try again in a sec. (<i>{_safe_exc(exc)}</i>)")
+    except Exception as exc:  # noqa: BLE001
+        logger.exception(
+            "route_text_unhandled_error",
+            extra={"event": "route_text_unhandled_error", "chat_id": chat_id},
+        )
+        with suppress(Exception):
+            await message.answer(f"something broke on my end. try again in a sec. (<i>{_safe_exc(exc)}</i>)")
     finally:
         stop.set()
         typing_task.cancel()
