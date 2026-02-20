@@ -253,37 +253,45 @@ def correlation_template(payload: dict) -> str:
 
 
 def help_text() -> str:
-    return (
-        "I read natural language. Try:\n"
-        "- SOL long\n"
-        "- SOL 4h\n"
-        "- SOL long 15m ema9 ema21 rsi14\n"
-        "- ETH short tf=1h,4h ema=20,50,200 rsi=14,21\n"
-        "- BTC long all timeframes all emas all rsis\n"
-        "- BTC limit long entry 66300 sl 64990 tp 69200 72000\n"
-        "- long BTC entry 66300 sl 64990 tp 69200 72000 amount 100 leverage 10\n"
-        "- rsi top 10 1h oversold\n"
-        "- top rsi 4h overbought\n"
-        "- find pair xion\n"
-        "- coin around 0.155\n"
-        "- ETH short\n"
-        "- Coins to watch 5\n"
-        "- ping me when SOL hits 100\n"
-        "- list my alerts / clear my alerts\n"
-        "- scan solana <address>\n"
-        "- scan tron <address>\n"
-        "- check this trade from yesterday: ETH entry 2100 stop 2165 targets 2043 2027 1991 timeframe 1h\n"
-        "- is BIRB following BTC?\n"
-        "- what are the latest news today\n"
-        "- cpi news\n"
-        "- openai updates\n"
-        "- source? / which exchange?\n"
-        "Commands: /start /help /id /settings /alpha <symbol> [tf] [ema=..] [rsi=..] /watch <symbol> [tf] "
-        "/chart <symbol> [tf] /heatmap <symbol> /rsi <tf> <overbought|oversold> [topN] [len] /ema <ema_len> <tf> [topN] "
-        "/news [crypto|openai|cpi|fomc] [limit] /alert <symbol> <price> [above|below|cross] /alerts /alertdel <id> "
-        "/alertclear [symbol] /findpair <price_or_query> /setup <freeform setup text> "
-        "/scan <chain> <address> /tradecheck /cycle /giveaway start <10m|1h> <prize> [winners=N] /giveaway join /giveaway end /giveaway reroll /giveaway status /join"
-    )
+    lines = [
+        "Ghost Alpha Help",
+        "",
+        "Free-talk examples:",
+        "- SOL long",
+        "- SOL 4h",
+        "- chart BTC 1h",
+        "- rsi top 10 1h oversold",
+        "- ema 200 4h top 10",
+        "- latest crypto news",
+        "- cpi news",
+        "- alert me when SOL hits 100",
+        "- list my alerts",
+        "- clear my alerts",
+        "- find pair xion",
+        "- coin around 0.155",
+        "- scan solana <address>",
+        "- check this trade from yesterday: ETH entry 2100 stop 2165 targets 2043 2027 1991 timeframe 1h",
+        "",
+        "Slash commands (optional):",
+        "- /alpha <symbol> [tf] [ema=..] [rsi=..]",
+        "- /watch <symbol> [tf]",
+        "- /chart <symbol> [tf]",
+        "- /heatmap <symbol>",
+        "- /rsi <tf> <overbought|oversold> [topN] [len]",
+        "- /ema <ema_len> <tf> [topN]",
+        "- /news [crypto|openai|cpi|fomc] [limit]",
+        "- /alert <symbol> <price> [above|below|cross]",
+        "- /alerts | /alertdel <id> | /alertclear [symbol]",
+        "- /findpair <price_or_query>",
+        "- /setup <freeform setup text>",
+        "- /scan <chain> <address>",
+        "- /tradecheck | /cycle",
+        "- /giveaway (opens buttons)",
+        "- /join",
+        "",
+        "Tip: You can just type naturally. Commands are optional.",
+    ]
+    return "\n".join(lines)
 
 
 def settings_text(settings: dict) -> str:
