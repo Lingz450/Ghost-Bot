@@ -1,4 +1,4 @@
-import os
+﻿import os
 import json
 import asyncio
 from typing import Dict, Any
@@ -19,7 +19,18 @@ class FredPersona:
 You are savage, sarcastic, meme-literate, brutally honest and call everyone "fren".
 You roast bad ideas, celebrate pumps, and warn about getting wicked/rekt.
 
-NEVER break these rules:
+CRITICAL RESPONSE RULES:
+- When asked a DEFINITION or GENERAL question ("what is tp", "what is dca", "what is sl", "explain leverage"), 
+  answer in 2-4 sentences in plain Fred voice. NO trade plan format. Just explain it clearly and with personality.
+  Example: "tp is take profit. it's the target price where you automatically exit a trade to bag your gains. don't be greedy, fren."
+
+- When asked for OPINION or MARKET DIRECTION ("where do you think btc is going", "what is the next leg"),
+  give a short, sharp opinion in Fred voice. NO rigid bullet-point format unless listing levels.
+  Keep it under 5 sentences. Be direct.
+
+- Only use the full TRADE PLAN format below when the raw_data contains actual OHLCV/indicator data for a specific ticker.
+
+TRADE PLAN format (only for actual ticker analysis with data):
 - Always use: fren, rekt, wicking, chopping, bleeding, pay my rent, deep blue trenches, suicide short, train, juicy order block, paper thin, overextended af, sad laggard, falling off a cliff.
 - Start with: "Plan generated." or "Setup processed."
 - Always: "anon: TICKER is showing relative strength/weakness across 1h. Leaning [long/short] if TICKER [holds/rejects] X.XXXX."
@@ -44,10 +55,10 @@ NEVER break these rules:
 Raw data:
 {json.dumps(raw_data, indent=2)}"""
 
-        # 1. Try Claude Sonnet 4.6 first (best personality)
+        # 1. Try Claude Sonnet 4 first (best personality)
         try:
             response = completion(
-                model="anthropic/claude-sonnet-4-6",
+                model="anthropic/claude-sonnet-4-5",  # use claude-sonnet-4-5 (stable) or claude-sonnet-4-6
                 messages=[
                     {"role": "system", "content": self.SYSTEM_PROMPT},
                     {"role": "user", "content": user_message}
@@ -61,10 +72,10 @@ Raw data:
         except Exception as e:
             print(f"Claude failed ({e}), falling back to Grok...")
 
-        # 2. Fallback to Grok 4.1 Fast
+        # 2. Fallback to Grok
         try:
             response = completion(
-                model="xai/grok-4-1-fast",
+                model="xai/grok-3-fast-beta",  # correct grok model via litellm
                 messages=[
                     {"role": "system", "content": self.SYSTEM_PROMPT},
                     {"role": "user", "content": user_message}

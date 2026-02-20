@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 from dataclasses import dataclass
@@ -46,24 +46,37 @@ Given the user's message, produce:
   "params": { ... }
 }
 
-Rules:
-- If user asks for crypto news ("latest crypto news", "news today", "what's happening"), set intent="news_digest" with params {"range":"today","limit":6}.
-- If user asks for CPI/FOMC/macro updates, set intent="news_digest" and include params {"topic":"cpi" or "macro","mode":"macro","limit":6}.
-- If user asks for OpenAI/ChatGPT/GPT/Codex updates, set intent="news_digest" and include params {"topic":"openai","mode":"openai","limit":6}.
-- If user says "watch btc" or "btc 4h", set intent="watch_asset" with {"symbol":"BTC","timeframe":"4h"} (default timeframe "1h" if missing).
-- If user says "<symbol> long/short", set intent="market_analysis" with {"symbol":"<symbol>","side":"long|short"} and optional timeframe.
-- If user asks for "coins to watch", "coins to short", or "coins to long", set intent="watchlist" with params {"count":5, "direction":"short|long"} as applicable.
-- If user asks for "ema 200 4h top 10" or "coins near ema200", set intent="ema_scan" with {"ema_length":200,"timeframe":"4h","limit":10}.
-- If user asks for chart/candles, set intent="chart" with {"symbol":"BTC","timeframe":"1h"}.
-- If user asks for heatmap/orderbook/depth, set intent="heatmap" with {"symbol":"BTC"}.
-- If user says "alert me when X hits Y", set intent="alert_create" with {"symbol":"X","operator":">=" or "<=","price":Y}.
-- If user says "list alerts", set intent="alert_list". If "clear/reset alerts", set intent="alert_clear".
-- If user says "remove my sol alert", set intent="alert_delete" with {"symbol":"SOL"}.
-- If user asks to "find pair", use intent="pair_find". If user provides a price and asks possible coins, use "price_guess" with {"price":...,"limit":10}.
-- If user provides entry/stop/targets and optionally amount/leverage, use "setup_review".
-- If giveaway is requested, route to giveaway_* intents.
-- If not crypto-related, use "general_chat".
-- If uncertain, set "general_chat" and low confidence.
+CRITICAL ROUTING RULES — read carefully:
+
+1. GENERAL QUESTIONS AND DEFINITIONS always → "general_chat":
+   - "what is X", "what does X mean", "what is the meaning of X", "explain X", "define X"
+   - Examples: "what is tp", "what is sl", "what is dca", "what is leverage", "what is a long position"
+   - Even if X looks like a ticker (DCA, TP, SL) — if the sentence is a definition question, use "general_chat"
+
+2. OPINION / PREDICTION QUESTIONS always → "general_chat":
+   - "where do you think BTC is going", "what do you think about the market", "where is the next leg"
+   - "is BTC bullish", "will ETH pump", "do you think SOL will recover"
+   - These are conversational — not chart/analysis commands.
+
+3. MARKET ANALYSIS only when user gives a clear COMMAND like:
+   - "BTC long", "ETH short 4h", "analyze SOL", "SOL 1h"
+   - NOT when asking a question about price direction in natural language.
+
+4. Other routing rules:
+   - Crypto news ("latest crypto news", "news today", "what's happening") → "news_digest" params {"range":"today","limit":6}
+   - CPI/FOMC/macro updates → "news_digest" params {"topic":"macro","mode":"macro","limit":6}
+   - "watch btc" or "btc 4h" → "watch_asset" {"symbol":"BTC","timeframe":"4h"}
+   - "<symbol> long/short" (command form) → "market_analysis" {"symbol":"<symbol>","side":"long|short"}
+   - "coins to watch/short/long" → "watchlist" {"count":5,"direction":"short|long"}
+   - "ema 200 4h top 10" → "ema_scan" {"ema_length":200,"timeframe":"4h","limit":10}
+   - Chart/candles → "chart" {"symbol":"BTC","timeframe":"1h"}
+   - Heatmap/orderbook → "heatmap" {"symbol":"BTC"}
+   - "alert me when X hits Y" → "alert_create" {"symbol":"X","operator":">="|"<=","price":Y}
+   - "list alerts" → "alert_list"; "clear/reset alerts" → "alert_clear"
+   - "remove my SOL alert" → "alert_delete" {"symbol":"SOL"}
+   - Setup/trade math with levels → "setup_review" or "trade_math"
+   - Giveaway commands → giveaway_* intents
+   - When uncertain → "general_chat" with low confidence
 """
 
 ROUTER_ALLOWED_INTENTS = {

@@ -192,24 +192,25 @@ COMMON_STOPWORDS = {
 }
 
 COMMON_WORDS_NOT_TICKERS = {
+    # question words
     "define",
     "what",
     "explain",
     "show",
     "list",
     "help",
-    "trading",
-    "trade",
-    "market",
-    "crypto",
-    "price",
-    "coin",
-    "token",
-    "when",
     "how",
     "why",
     "who",
     "where",
+    "which",
+    "when",
+    "meaning",
+    "means",
+    "mean",
+    "think",
+    "thoughts",
+    "thought",
     "tell",
     "give",
     "find",
@@ -217,6 +218,52 @@ COMMON_WORDS_NOT_TICKERS = {
     "set",
     "make",
     "do",
+    "does",
+    "did",
+    "been",
+    # articles / prepositions / conjunctions
+    "the",
+    "a",
+    "an",
+    "of",
+    "in",
+    "on",
+    "at",
+    "to",
+    "for",
+    "with",
+    "by",
+    "from",
+    "up",
+    "out",
+    "as",
+    "into",
+    "through",
+    "about",
+    "and",
+    "but",
+    "or",
+    "so",
+    "yet",
+    "that",
+    "this",
+    "these",
+    "those",
+    "its",
+    "it",
+    "you",
+    "your",
+    "my",
+    "me",
+    "we",
+    "our",
+    "their",
+    "them",
+    "i",
+    "he",
+    "she",
+    "they",
+    # verbs
     "is",
     "are",
     "was",
@@ -225,30 +272,102 @@ COMMON_WORDS_NOT_TICKERS = {
     "should",
     "would",
     "could",
+    "has",
+    "have",
+    "had",
+    "go",
+    "going",
+    "think",
+    "know",
+    "see",
+    "look",
+    "like",
+    "use",
+    "used",
+    # descriptors
     "good",
     "bad",
     "best",
     "worst",
-    "top",
-    "bottom",
     "high",
     "low",
+    "next",
+    "last",
+    "first",
+    "just",
+    "really",
+    "very",
+    "more",
+    "less",
+    "most",
+    "much",
+    "any",
+    "all",
+    "some",
+    "no",
+    "not",
+    "also",
+    "then",
+    "now",
+    # trading concepts (words — not tickers)
+    "trading",
+    "trade",
+    "market",
+    "crypto",
+    "price",
+    "coin",
+    "token",
     "buy",
     "sell",
-    "long",
-    "short",
     "hold",
-    "about",
-    "the",
-    "a",
-    "an",
+    "top",
+    "bottom",
+    "leg",
+    "legs",
+    "move",
+    "moves",
+    "direction",
+    "level",
+    "levels",
+    "signal",
+    "signals",
+    "analysis",
+    "analyze",
+    "strategy",
+    "position",
+    "portfolio",
+    "profit",
+    "loss",
+    "risk",
+    "reward",
+    "dollar",
+    "cost",
+    "average",
+    "averaging",
+    "support",
+    "resistance",
+    "trend",
+    "momentum",
+    "volume",
+    "indicator",
+    "indicators",
+    "breakout",
+    "breakdown",
+    "bullish",
+    "bearish",
+    "pump",
+    "dump",
+    # common abbreviations people ask ABOUT (not tickers)
+    "dca",  # dollar cost averaging — people ask "what is dca"
+    "tp",   # take profit — asked as a concept
+    "sl",   # stop loss — asked as a concept
 }
 
 ENGLISH_PHRASE_EXCLUDE_RE = re.compile(
     r"\b("
-    r"alert|scan|chart|heatmap|orderbook|depth|rsi|ema|watchlist|watch|pair|tradecheck|setup|"
-    r"entry|stop|sl|tp\d*|target|long|short|giveaway|news|cycle|correlation|following|wallet|"
-    r"candles?|plot|price|funding|open interest|oi"
+    r"alert|scan|chart|heatmap|orderbook|depth|rsi\s*\d|ema\s*\d|watchlist|pair|tradecheck|setup|"
+    r"entry\s*[:=0-9]|sl\s*[:=0-9]|tp\d+|giveaway|cycle|correlation|following|wallet|"
+    r"candles?|plot|funding|open interest"
     r")\b",
     re.IGNORECASE,
 )
@@ -415,11 +534,40 @@ def _looks_like_smalltalk(lower: str) -> bool:
 
 
 def is_likely_english_phrase(text: str) -> bool:
+    """Return True when the message is a natural-language question/statement,
+    not a ticker command.  Triggers the LLM general-chat path instead of
+    the coin-analysis path.
+    """
     words = [w.strip(".,!?;:()[]{}\"'").lower() for w in text.split() if w.strip()]
+    if not words:
+        return False
+
+    # Explicit definitional / conceptual questions — highest priority
+    # e.g. "what is dca", "what is the meaning of sl", "explain tp", "define leverage"
+    DEFINITION_RE = re.compile(
+        r"^\s*(what\s+(is|are|does)|what('s| is)\s+the\s+(meaning|definition|concept)\s+of|"
+        r"explain\s+|define\s+|how\s+does\s+|how\s+do\s+|what\s+do\s+you\s+(mean|think)|"
+        r"where\s+do\s+you\s+think|what\s+do\s+you\s+think|do\s+you\s+think|"
+        r"why\s+(is|are|do|did)|who\s+(is|are)|when\s+(is|did|will)|tell\s+me\s+(about|what)|"
+        r"give\s+me\s+|how\s+is\s+|how\s+are\s+)",
+        re.IGNORECASE,
+    )
+    if DEFINITION_RE.match(text.strip()):
+        return True
+
+    # Sentence-like: majority of words are common English (not tickers)
     if len(words) >= 2:
         common_count = sum(1 for w in words if w in COMMON_WORDS_NOT_TICKERS)
-        if common_count / len(words) > 0.5:
+        ratio = common_count / len(words)
+        # Lower threshold for longer sentences (4+ words → 40% is enough)
+        threshold = 0.5 if len(words) <= 3 else 0.4
+        if ratio >= threshold:
             return True
+
+    # Short 2-word questions starting with a question word: "what tp", "explain sl"
+    if len(words) == 2 and words[0] in {"what", "explain", "define", "describe", "meaning"}:
+        return True
+
     return False
 
 
@@ -1021,12 +1169,21 @@ def parse_message(text: str) -> ParsedMessage:
         return ParsedMessage(Intent.ALERT_CREATE, {"symbol": symbol, "condition": condition, "target_price": target})
 
     symbol_tf_hint = bool(parse_timeframe(lower) and len(_extract_symbols(stripped)) >= 1)
-    analysis_hint = bool(
-        re.search(
-            r"\b(long|short)\b|what'?s happening with|long\?|\bema\b|\brsi\b|\btf\s*[:=]|\bwatch\s+\$?[a-z]{2,12}\b",
-            lower,
+    # Only treat as analysis if the message is NOT a natural-language question.
+    # This stops "where do you think BTC next leg is?" from routing to ANALYSIS.
+    _is_english = is_likely_english_phrase(stripped) and not ENGLISH_PHRASE_EXCLUDE_RE.search(lower)
+    analysis_hint = (
+        not _is_english
+        and (
+            bool(
+                re.search(
+                    r"\b(long|short)\b|what'?s happening with|long\?|\bema\b|\brsi\b|\btf\s*[:=]|\bwatch\s+\$?[a-z]{2,12}\b",
+                    lower,
+                )
+            )
+            or symbol_tf_hint
         )
-    ) or symbol_tf_hint
+    )
     if analysis_hint:
         symbols = _extract_symbols(stripped)
         if not symbols and re.match(r"^\s*me\s+(long|short)\b", lower):
