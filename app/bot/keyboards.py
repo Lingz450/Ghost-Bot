@@ -86,3 +86,173 @@ def smart_action_menu(symbol: str | None = None) -> InlineKeyboardMarkup:
     kb.button(text="OpenAI Updates", callback_data="quick:news:openai")
     kb.adjust(2, 2, 1, 2)
     return kb.as_markup()
+
+
+def command_center_menu() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="Alpha", callback_data="cmd:menu:alpha")
+    kb.button(text="Watch", callback_data="cmd:menu:watch")
+    kb.button(text="Chart", callback_data="cmd:menu:chart")
+    kb.button(text="Heatmap", callback_data="cmd:menu:heatmap")
+    kb.button(text="RSI Scan", callback_data="cmd:menu:rsi")
+    kb.button(text="EMA Scan", callback_data="cmd:menu:ema")
+    kb.button(text="News", callback_data="cmd:menu:news")
+    kb.button(text="Alerts", callback_data="cmd:menu:alert")
+    kb.button(text="Find Pair", callback_data="cmd:menu:findpair")
+    kb.button(text="Setup Math", callback_data="cmd:menu:setup")
+    kb.button(text="Scan Wallet", callback_data="cmd:menu:scan")
+    kb.button(text="Giveaway", callback_data="cmd:menu:giveaway")
+    kb.adjust(3, 3, 3, 3)
+    return kb.as_markup()
+
+
+def alpha_quick_menu() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="BTC 1h", callback_data="cmd:alpha:BTC:1h")
+    kb.button(text="BTC 4h", callback_data="cmd:alpha:BTC:4h")
+    kb.button(text="ETH 1h", callback_data="cmd:alpha:ETH:1h")
+    kb.button(text="ETH 4h", callback_data="cmd:alpha:ETH:4h")
+    kb.button(text="SOL 1h", callback_data="cmd:alpha:SOL:1h")
+    kb.button(text="SOL 4h", callback_data="cmd:alpha:SOL:4h")
+    kb.button(text="Custom", callback_data="cmd:alpha:custom")
+    kb.adjust(2, 2, 2, 1)
+    return kb.as_markup()
+
+
+def watch_quick_menu() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="BTC 1h", callback_data="cmd:watch:BTC:1h")
+    kb.button(text="ETH 1h", callback_data="cmd:watch:ETH:1h")
+    kb.button(text="SOL 1h", callback_data="cmd:watch:SOL:1h")
+    kb.button(text="BTC 4h", callback_data="cmd:watch:BTC:4h")
+    kb.button(text="ETH 4h", callback_data="cmd:watch:ETH:4h")
+    kb.button(text="SOL 4h", callback_data="cmd:watch:SOL:4h")
+    kb.button(text="Custom", callback_data="cmd:watch:custom")
+    kb.adjust(2, 2, 2, 1)
+    return kb.as_markup()
+
+
+def chart_quick_menu() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="BTC 1h", callback_data="cmd:chart:BTC:1h")
+    kb.button(text="BTC 4h", callback_data="cmd:chart:BTC:4h")
+    kb.button(text="ETH 1h", callback_data="cmd:chart:ETH:1h")
+    kb.button(text="SOL 1h", callback_data="cmd:chart:SOL:1h")
+    kb.button(text="Custom", callback_data="cmd:chart:custom")
+    kb.adjust(2, 2, 1)
+    return kb.as_markup()
+
+
+def heatmap_quick_menu() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="BTC", callback_data="cmd:heatmap:BTC")
+    kb.button(text="ETH", callback_data="cmd:heatmap:ETH")
+    kb.button(text="SOL", callback_data="cmd:heatmap:SOL")
+    kb.button(text="BNB", callback_data="cmd:heatmap:BNB")
+    kb.button(text="Custom", callback_data="cmd:heatmap:custom")
+    kb.adjust(2, 2, 1)
+    return kb.as_markup()
+
+
+def rsi_quick_menu() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="Oversold 1h Top 10", callback_data="cmd:rsi:1h:oversold:10:14")
+    kb.button(text="Overbought 1h Top 10", callback_data="cmd:rsi:1h:overbought:10:14")
+    kb.button(text="Oversold 4h Top 10", callback_data="cmd:rsi:4h:oversold:10:14")
+    kb.button(text="Overbought 4h Top 10", callback_data="cmd:rsi:4h:overbought:10:14")
+    kb.button(text="Custom", callback_data="cmd:rsi:custom")
+    kb.adjust(1, 1, 1, 1, 1)
+    return kb.as_markup()
+
+
+def ema_quick_menu() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="EMA200 4h Top 10", callback_data="cmd:ema:200:4h:10")
+    kb.button(text="EMA200 1d Top 10", callback_data="cmd:ema:200:1d:10")
+    kb.button(text="EMA50 1h Top 10", callback_data="cmd:ema:50:1h:10")
+    kb.button(text="EMA20 15m Top 10", callback_data="cmd:ema:20:15m:10")
+    kb.button(text="Custom", callback_data="cmd:ema:custom")
+    kb.adjust(1, 1, 1, 1, 1)
+    return kb.as_markup()
+
+
+def news_quick_menu() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="Crypto News", callback_data="cmd:news:crypto:6")
+    kb.button(text="OpenAI Updates", callback_data="cmd:news:openai:6")
+    kb.button(text="CPI News", callback_data="cmd:news:cpi:6")
+    kb.button(text="FOMC/Macro", callback_data="cmd:news:fomc:6")
+    kb.button(text="Top 8", callback_data="cmd:news:crypto:8")
+    kb.adjust(2, 2, 1)
+    return kb.as_markup()
+
+
+def alert_quick_menu() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="Create Alert", callback_data="cmd:alert:create")
+    kb.button(text="My Alerts", callback_data="cmd:alert:list")
+    kb.button(text="Clear All", callback_data="cmd:alert:clear")
+    kb.button(text="Delete by ID", callback_data="cmd:alert:delete")
+    kb.button(text="Pause All", callback_data="cmd:alert:pause")
+    kb.button(text="Resume All", callback_data="cmd:alert:resume")
+    kb.adjust(2, 2, 2)
+    return kb.as_markup()
+
+
+def findpair_quick_menu() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="Find by Price", callback_data="cmd:findpair:price")
+    kb.button(text="Find by Name", callback_data="cmd:findpair:query")
+    kb.adjust(2)
+    return kb.as_markup()
+
+
+def setup_quick_menu() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="Paste Setup", callback_data="cmd:setup:freeform")
+    kb.button(text="Tradecheck Wizard", callback_data="cmd:setup:wizard")
+    kb.adjust(2)
+    return kb.as_markup()
+
+
+def scan_quick_menu() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="Solana Address", callback_data="cmd:scan:solana")
+    kb.button(text="Tron Address", callback_data="cmd:scan:tron")
+    kb.adjust(2)
+    return kb.as_markup()
+
+
+def giveaway_menu(is_admin: bool) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    if is_admin:
+        kb.button(text="Start Giveaway", callback_data="gw:start")
+        kb.button(text="Status", callback_data="gw:status")
+        kb.button(text="End", callback_data="gw:end")
+        kb.button(text="Reroll", callback_data="gw:reroll")
+        kb.adjust(2, 2)
+        return kb.as_markup()
+    kb.button(text="Join Active Giveaway", callback_data="gw:join")
+    kb.button(text="Status", callback_data="gw:status")
+    kb.adjust(1, 1)
+    return kb.as_markup()
+
+
+def giveaway_duration_menu() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="5m", callback_data="gw:dur:300")
+    kb.button(text="10m", callback_data="gw:dur:600")
+    kb.button(text="30m", callback_data="gw:dur:1800")
+    kb.button(text="1h", callback_data="gw:dur:3600")
+    kb.button(text="6h", callback_data="gw:dur:21600")
+    kb.button(text="1d", callback_data="gw:dur:86400")
+    kb.adjust(3, 3)
+    return kb.as_markup()
+
+
+def giveaway_winners_menu(duration_seconds: int) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    for winners in (1, 2, 3):
+        kb.button(text=f"{winners} winner", callback_data=f"gw:win:{duration_seconds}:{winners}")
+    kb.adjust(3)
+    return kb.as_markup()

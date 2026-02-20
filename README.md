@@ -270,6 +270,7 @@ Behavior/test mode:
 - `/join`
 
 Natural language is fully supported, no strict command requirement.
+If you send a slash command without enough arguments, the bot now opens interactive button pickers (duration/timeframe/mode/etc.) instead of only showing usage text.
 When configured with `OPENAI_API_KEY`, an LLM JSON intent router handles free-form phrasing and maps to deterministic tools (analysis/alerts/news/scans/etc.).
 
 OpenAI response strategy is configurable:

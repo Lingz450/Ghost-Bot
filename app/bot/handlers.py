@@ -11,7 +11,28 @@ from aiogram.enums import ChatAction
 from aiogram.filters import Command
 from aiogram.types import BufferedInputFile, CallbackQuery, Message
 
-from app.bot.keyboards import analysis_actions, settings_menu, simple_followup, smart_action_menu, wallet_actions
+from app.bot.keyboards import (
+    alert_quick_menu,
+    alpha_quick_menu,
+    analysis_actions,
+    chart_quick_menu,
+    command_center_menu,
+    ema_quick_menu,
+    findpair_quick_menu,
+    giveaway_duration_menu,
+    giveaway_menu,
+    giveaway_winners_menu,
+    heatmap_quick_menu,
+    news_quick_menu,
+    rsi_quick_menu,
+    scan_quick_menu,
+    settings_menu,
+    setup_quick_menu,
+    simple_followup,
+    smart_action_menu,
+    wallet_actions,
+    watch_quick_menu,
+)
 from app.bot.templates import (
     asset_unsupported_template,
     correlation_template,
@@ -64,6 +85,9 @@ SOURCE_QUERY_STOPWORDS = {
     "last",
 }
 ACTION_SYMBOL_STOPWORDS = {
+    "what",
+    "who",
+    "hwo",
     "how",
     "are",
     "you",
@@ -984,6 +1008,21 @@ async def _wizard_clear(chat_id: int) -> None:
     await hub.cache.redis.delete(f"wizard:tradecheck:{chat_id}")
 
 
+async def _cmd_wizard_get(chat_id: int) -> dict | None:
+    hub = _require_hub()
+    return await hub.cache.get_json(f"wizard:cmd:{chat_id}")
+
+
+async def _cmd_wizard_set(chat_id: int, payload: dict, ttl: int = 900) -> None:
+    hub = _require_hub()
+    await hub.cache.set_json(f"wizard:cmd:{chat_id}", payload, ttl=ttl)
+
+
+async def _cmd_wizard_clear(chat_id: int) -> None:
+    hub = _require_hub()
+    await hub.cache.redis.delete(f"wizard:cmd:{chat_id}")
+
+
 async def _save_trade_check(chat_id: int, data: dict, result: dict) -> None:
     hub = _require_hub()
     user = await hub.user_service.ensure_user(chat_id)
@@ -1438,7 +1477,7 @@ async def start_cmd(message: Message) -> None:
 
 @router.message(Command("help"))
 async def help_cmd(message: Message) -> None:
-    await message.answer(help_text())
+    await message.answer(help_text(), reply_markup=command_center_menu())
 
 
 @router.message(Command("id"))
@@ -1465,7 +1504,7 @@ async def alpha_cmd(message: Message) -> None:
     args = raw.split(maxsplit=1)[1] if len(raw.split(maxsplit=1)) > 1 else ""
     text = args.strip()
     if not text:
-        await message.answer("Usage: /alpha <symbol> [tf] [ema=..] [rsi=..]")
+        await message.answer("Pick an analysis shortcut or tap Custom.", reply_markup=alpha_quick_menu())
         return
     tokens = text.split()
     if len(tokens) == 1:
@@ -1479,7 +1518,7 @@ async def watch_cmd(message: Message) -> None:
     args = raw.split(maxsplit=1)[1] if len(raw.split(maxsplit=1)) > 1 else ""
     text = args.strip()
     if not text:
-        await message.answer("Usage: /watch <symbol> [tf]")
+        await message.answer("Pick a watch shortcut or tap Custom.", reply_markup=watch_quick_menu())
         return
     await _dispatch_command_text(message, f"watch {text}")
 
@@ -1490,7 +1529,7 @@ async def chart_cmd(message: Message) -> None:
     args = raw.split(maxsplit=1)[1] if len(raw.split(maxsplit=1)) > 1 else ""
     text = args.strip()
     if not text:
-        await message.answer("Usage: /chart <symbol> [tf]")
+        await message.answer("Pick a chart shortcut or tap Custom.", reply_markup=chart_quick_menu())
         return
     await _dispatch_command_text(message, f"chart {text}")
 
@@ -1501,7 +1540,7 @@ async def heatmap_cmd(message: Message) -> None:
     args = raw.split(maxsplit=1)[1] if len(raw.split(maxsplit=1)) > 1 else ""
     text = args.strip()
     if not text:
-        await message.answer("Usage: /heatmap <symbol>")
+        await message.answer("Pick a symbol for heatmap or tap Custom.", reply_markup=heatmap_quick_menu())
         return
     await _dispatch_command_text(message, f"heatmap {text}")
 
@@ -1511,7 +1550,7 @@ async def rsi_cmd(message: Message) -> None:
     raw = (message.text or "").strip()
     parts = raw.split()
     if len(parts) < 3:
-        await message.answer("Usage: /rsi <tf> <overbought|oversold> [topN] [len]")
+        await message.answer("Pick an RSI scanner preset or tap Custom.", reply_markup=rsi_quick_menu())
         return
     timeframe = parts[1].lower()
     mode = parts[2].lower()
@@ -1528,7 +1567,7 @@ async def ema_cmd(message: Message) -> None:
     raw = (message.text or "").strip()
     parts = raw.split()
     if len(parts) < 3:
-        await message.answer("Usage: /ema <ema_len> <tf> [topN]")
+        await message.answer("Pick an EMA scanner preset or tap Custom.", reply_markup=ema_quick_menu())
         return
     ema_len = max(2, min(_as_int(parts[1], 200), 500))
     timeframe = parts[2].lower()
@@ -1563,6 +1602,9 @@ async def news_cmd(message: Message) -> None:
     mode = "crypto"
     limit = 6
     parts = text.split()
+    if len(parts) == 1:
+        await message.answer("Pick a news mode.", reply_markup=news_quick_menu())
+        return
     if len(parts) > 1:
         raw_topic = parts[1].strip()
         if raw_topic.isdigit():
@@ -1609,7 +1651,7 @@ async def scan_cmd(message: Message) -> None:
     text = message.text or ""
     m = re.search(r"/scan\s+(solana|tron)\s+([A-Za-z0-9]+)", text, re.IGNORECASE)
     if not m:
-        await message.answer("Usage: /scan <solana|tron> <address>")
+        await message.answer("Pick chain first, then paste address.", reply_markup=scan_quick_menu())
         return
 
     limiter = await hub.rate_limiter.check(
@@ -1715,10 +1757,7 @@ async def alert_cmd(message: Message) -> None:
         )
         return
 
-    await message.answer(
-        "Use /alert <symbol> <price> [above|below|cross] | /alerts | /alertdel <id> | /alertclear [symbol] | "
-        "/alert add <symbol> <above|below|cross> <price> | /alert list"
-    )
+    await message.answer("Pick an alert action.", reply_markup=alert_quick_menu())
 
 
 @router.message(Command("alerts"))
@@ -1750,7 +1789,12 @@ async def alertdel_cmd(message: Message) -> None:
     text = (message.text or "").strip()
     m = re.search(r"^/alertdel\s+(\d+)\s*$", text, re.IGNORECASE)
     if not m:
-        await message.answer("Usage: /alertdel <id>")
+        alerts = await hub.alerts_service.list_alerts(message.chat.id)
+        if not alerts:
+            await message.answer("No active alerts.", reply_markup=alert_quick_menu())
+            return
+        options = [(f"Delete #{a.id}", f"cmd:alertdel:{a.id}") for a in alerts[:8]]
+        await message.answer("Tap an alert to delete.", reply_markup=simple_followup(options))
         return
     ok = await hub.alerts_service.delete_alert(message.chat.id, int(m.group(1)))
     await message.answer("Deleted." if ok else "Alert not found.")
@@ -1766,8 +1810,7 @@ async def alertclear_cmd(message: Message) -> None:
         count = await hub.alerts_service.delete_alerts_by_symbol(message.chat.id, symbol)
         await message.answer(f"Cleared {count} alerts for {symbol}.")
         return
-    count = await hub.alerts_service.clear_user_alerts(message.chat.id)
-    await message.answer(f"Cleared {count} alerts.")
+    await message.answer("Pick clear action.", reply_markup=simple_followup([("Clear all alerts", "cmd:alert:clear"), ("Clear by symbol", "cmd:alert:clear_symbol")]))
 
 
 @router.message(Command("tradecheck"))
@@ -1782,7 +1825,7 @@ async def findpair_cmd(message: Message) -> None:
     args = raw.split(maxsplit=1)[1] if len(raw.split(maxsplit=1)) > 1 else ""
     query = args.strip()
     if not query:
-        await message.answer("Usage: /findpair <price_or_query>")
+        await message.answer("Pick find mode.", reply_markup=findpair_quick_menu())
         return
     if re.fullmatch(r"[0-9]+(?:\.[0-9]+)?", query):
         await _dispatch_command_text(message, f"coin around {query}")
@@ -1795,7 +1838,7 @@ async def setup_cmd(message: Message) -> None:
     raw = (message.text or "").strip()
     args = raw.split(maxsplit=1)[1] if len(raw.split(maxsplit=1)) > 1 else ""
     if not args.strip():
-        await message.answer("Usage: /setup <freeform setup text>")
+        await message.answer("Choose setup input mode.", reply_markup=setup_quick_menu())
         return
     await _dispatch_command_text(message, args.strip())
 
@@ -1894,9 +1937,282 @@ async def giveaway_cmd(message: Message) -> None:
         )
         return
 
-    await message.answer(
-        "Usage: /giveaway start <duration> <prize> [winners=N] | /giveaway join | /giveaway end | /giveaway reroll | /giveaway status"
-    )
+    await message.answer("Pick giveaway action.", reply_markup=giveaway_menu(is_admin=hub.giveaway_service.is_admin(message.from_user.id)))
+
+
+@router.callback_query(F.data.startswith("cmd:"))
+async def command_menu_callback(callback: CallbackQuery) -> None:
+    if not await _acquire_callback_once(callback):
+        with suppress(Exception):
+            await callback.answer()
+        return
+    hub = _require_hub()
+    chat_id = callback.message.chat.id
+    data = callback.data or ""
+    parts = data.split(":")
+    if len(parts) < 2:
+        await callback.answer()
+        return
+
+    def _menu_for(name: str):
+        mapping = {
+            "alpha": ("Pick analysis shortcut.", alpha_quick_menu()),
+            "watch": ("Pick watch shortcut.", watch_quick_menu()),
+            "chart": ("Pick chart shortcut.", chart_quick_menu()),
+            "heatmap": ("Pick heatmap symbol.", heatmap_quick_menu()),
+            "rsi": ("Pick RSI scanner preset.", rsi_quick_menu()),
+            "ema": ("Pick EMA scanner preset.", ema_quick_menu()),
+            "news": ("Pick news mode.", news_quick_menu()),
+            "alert": ("Pick alert action.", alert_quick_menu()),
+            "findpair": ("Pick find mode.", findpair_quick_menu()),
+            "setup": ("Choose setup input mode.", setup_quick_menu()),
+            "scan": ("Pick chain first.", scan_quick_menu()),
+            "giveaway": ("Pick giveaway action.", giveaway_menu(is_admin=hub.giveaway_service.is_admin(callback.from_user.id))),
+        }
+        return mapping.get(name)
+
+    if parts[1] == "menu":
+        menu = _menu_for(parts[2] if len(parts) > 2 else "")
+        if menu:
+            await callback.message.answer(menu[0], reply_markup=menu[1])
+        await callback.answer()
+        return
+
+    async def _dispatch_with_typing(synthetic_text: str) -> None:
+        async def _run() -> None:
+            await _dispatch_command_text(callback.message, synthetic_text)
+            await callback.answer()
+
+        await _run_with_typing_lock(callback.bot, chat_id, _run)
+
+    action = parts[1]
+    if action == "alpha":
+        if len(parts) >= 3 and parts[2] == "custom":
+            await _cmd_wizard_set(chat_id, {"step": "dispatch_text", "prefix": ""})
+            await callback.message.answer("Send symbol and optional tf, e.g. `SOL 4h`.")
+            await callback.answer()
+            return
+        if len(parts) >= 4:
+            await _dispatch_with_typing(f"{parts[2]} {parts[3]}")
+            return
+    if action == "watch":
+        if len(parts) >= 3 and parts[2] == "custom":
+            await _cmd_wizard_set(chat_id, {"step": "dispatch_text", "prefix": "watch "})
+            await callback.message.answer("Send symbol and optional tf, e.g. `BTC 1h`.")
+            await callback.answer()
+            return
+        if len(parts) >= 4:
+            await _dispatch_with_typing(f"watch {parts[2]} {parts[3]}")
+            return
+    if action == "chart":
+        if len(parts) >= 3 and parts[2] == "custom":
+            await _cmd_wizard_set(chat_id, {"step": "dispatch_text", "prefix": "chart "})
+            await callback.message.answer("Send symbol and optional tf, e.g. `ETH 4h`.")
+            await callback.answer()
+            return
+        if len(parts) >= 4:
+            await _dispatch_with_typing(f"chart {parts[2]} {parts[3]}")
+            return
+    if action == "heatmap":
+        if len(parts) >= 3 and parts[2] == "custom":
+            await _cmd_wizard_set(chat_id, {"step": "dispatch_text", "prefix": "heatmap "})
+            await callback.message.answer("Send symbol, e.g. `BTC`.")
+            await callback.answer()
+            return
+        if len(parts) >= 3:
+            await _dispatch_with_typing(f"heatmap {parts[2]}")
+            return
+    if action == "rsi":
+        if len(parts) >= 3 and parts[2] == "custom":
+            await _cmd_wizard_set(chat_id, {"step": "dispatch_text", "prefix": "rsi "})
+            await callback.message.answer("Send format: `1h oversold top 10 rsi14`.")
+            await callback.answer()
+            return
+        if len(parts) >= 6:
+            await _dispatch_with_typing(f"rsi top {parts[4]} {parts[2]} {parts[3]} rsi{parts[5]}")
+            return
+    if action == "ema":
+        if len(parts) >= 3 and parts[2] == "custom":
+            await _cmd_wizard_set(chat_id, {"step": "dispatch_text", "prefix": "ema "})
+            await callback.message.answer("Send format: `200 4h top 10`.")
+            await callback.answer()
+            return
+        if len(parts) >= 5:
+            await _dispatch_with_typing(f"ema {parts[2]} {parts[3]} top {parts[4]}")
+            return
+    if action == "news" and len(parts) >= 4:
+        await _dispatch_with_typing(f"news {parts[2]} {parts[3]}")
+        return
+    if action == "alert":
+        if len(parts) >= 3 and parts[2] == "create":
+            await _cmd_wizard_set(chat_id, {"step": "dispatch_text", "prefix": "alert "})
+            await callback.message.answer("Send: `<symbol> <price> [above|below|cross]`, e.g. `SOL 100 above`.")
+            await callback.answer()
+            return
+        if len(parts) >= 3 and parts[2] == "list":
+            await _dispatch_with_typing("list my alerts")
+            return
+        if len(parts) >= 3 and parts[2] == "clear":
+            await _dispatch_with_typing("clear my alerts")
+            return
+        if len(parts) >= 3 and parts[2] == "pause":
+            await _dispatch_with_typing("pause alerts")
+            return
+        if len(parts) >= 3 and parts[2] == "resume":
+            await _dispatch_with_typing("resume alerts")
+            return
+        if len(parts) >= 3 and parts[2] == "delete":
+            await _cmd_wizard_set(chat_id, {"step": "dispatch_text", "prefix": "delete alert "})
+            await callback.message.answer("Send alert id, e.g. `12`.")
+            await callback.answer()
+            return
+        if len(parts) >= 3 and parts[2] == "clear_symbol":
+            await _cmd_wizard_set(chat_id, {"step": "alert_clear_symbol"})
+            await callback.message.answer("Send symbol to clear, e.g. `SOL`.")
+            await callback.answer()
+            return
+    if action == "findpair":
+        if len(parts) >= 3 and parts[2] == "price":
+            await _cmd_wizard_set(chat_id, {"step": "dispatch_text", "prefix": "coin around "})
+            await callback.message.answer("Send target price, e.g. `0.155`.")
+            await callback.answer()
+            return
+        if len(parts) >= 3 and parts[2] == "query":
+            await _cmd_wizard_set(chat_id, {"step": "dispatch_text", "prefix": "find pair "})
+            await callback.message.answer("Send name/ticker/context, e.g. `xion`.")
+            await callback.answer()
+            return
+    if action == "setup":
+        if len(parts) >= 3 and parts[2] == "wizard":
+            await _wizard_set(chat_id, {"step": "symbol", "data": {}})
+            await callback.message.answer("Tradecheck wizard: send symbol (e.g., ETH).")
+            await callback.answer()
+            return
+        if len(parts) >= 3 and parts[2] == "freeform":
+            await _cmd_wizard_set(chat_id, {"step": "dispatch_text", "prefix": ""})
+            await callback.message.answer("Paste setup text, e.g. `entry 2100 stop 2165 targets 2043 2027 1991`.")
+            await callback.answer()
+            return
+    if action == "scan" and len(parts) >= 3:
+        chain = "solana" if parts[2] == "solana" else "tron"
+        await _cmd_wizard_set(chat_id, {"step": "dispatch_text", "prefix": f"scan {chain} "})
+        await callback.message.answer(f"Paste {chain} address.")
+        await callback.answer()
+        return
+    if action == "alertdel" and len(parts) >= 3:
+        await _dispatch_with_typing(f"delete alert {parts[2]}")
+        return
+
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("gw:"))
+async def giveaway_menu_callback(callback: CallbackQuery) -> None:
+    if not await _acquire_callback_once(callback):
+        with suppress(Exception):
+            await callback.answer()
+        return
+    hub = _require_hub()
+    chat_id = callback.message.chat.id
+    data = callback.data or ""
+    parts = data.split(":")
+    action = parts[1] if len(parts) > 1 else ""
+    user_id = callback.from_user.id if callback.from_user else None
+
+    async def _run_and_answer(runner) -> None:
+        async def _run() -> None:
+            await runner()
+            await callback.answer()
+
+        await _run_with_typing_lock(callback.bot, chat_id, _run)
+
+    if action == "start":
+        if not hub.giveaway_service.is_admin(user_id or 0):
+            await callback.answer("Admin only", show_alert=True)
+            return
+        await callback.message.answer("Pick duration.", reply_markup=giveaway_duration_menu())
+        await callback.answer()
+        return
+    if action == "dur" and len(parts) >= 3:
+        if not hub.giveaway_service.is_admin(user_id or 0):
+            await callback.answer("Admin only", show_alert=True)
+            return
+        duration_seconds = max(30, _as_int(parts[2], 600))
+        await callback.message.answer("Pick number of winners.", reply_markup=giveaway_winners_menu(duration_seconds))
+        await callback.answer()
+        return
+    if action == "win" and len(parts) >= 4:
+        if not hub.giveaway_service.is_admin(user_id or 0):
+            await callback.answer("Admin only", show_alert=True)
+            return
+        duration_seconds = max(30, _as_int(parts[2], 600))
+        winners = max(1, min(_as_int(parts[3], 1), 5))
+        await _cmd_wizard_set(chat_id, {"step": "giveaway_prize", "duration_seconds": duration_seconds, "winners": winners})
+        await callback.message.answer("Send giveaway prize text, e.g. `50 USDT`.")
+        await callback.answer()
+        return
+    if action == "join":
+        if not user_id:
+            await callback.answer("No user", show_alert=True)
+            return
+
+        async def _runner() -> None:
+            try:
+                payload = await hub.giveaway_service.join_active(chat_id, user_id)
+            except Exception as exc:  # noqa: BLE001
+                await callback.message.answer(str(exc))
+                return
+            await callback.message.answer(f"Joined giveaway #{payload['giveaway_id']}. Participants: {payload['participants']}")
+
+        await _run_and_answer(_runner)
+        return
+    if action == "status":
+        async def _runner() -> None:
+            payload = await hub.giveaway_service.status(chat_id)
+            await callback.message.answer(giveaway_status_template(payload))
+
+        await _run_and_answer(_runner)
+        return
+    if action == "end":
+        if not hub.giveaway_service.is_admin(user_id or 0):
+            await callback.answer("Admin only", show_alert=True)
+            return
+
+        async def _runner() -> None:
+            try:
+                payload = await hub.giveaway_service.end_giveaway(chat_id, user_id)
+            except Exception as exc:  # noqa: BLE001
+                await callback.message.answer(str(exc))
+                return
+            if payload.get("winner_user_id"):
+                await callback.message.answer(
+                    f"Giveaway #{payload['giveaway_id']} ended.\nWinner: {payload['winner_user_id']}\nPrize: {payload['prize']}"
+                )
+            else:
+                await callback.message.answer(f"Giveaway ended with no winner. {payload.get('note')}")
+
+        await _run_and_answer(_runner)
+        return
+    if action == "reroll":
+        if not hub.giveaway_service.is_admin(user_id or 0):
+            await callback.answer("Admin only", show_alert=True)
+            return
+
+        async def _runner() -> None:
+            try:
+                payload = await hub.giveaway_service.reroll(chat_id, user_id)
+            except Exception as exc:  # noqa: BLE001
+                await callback.message.answer(str(exc))
+                return
+            await callback.message.answer(
+                f"Reroll complete for giveaway #{payload['giveaway_id']}.\n"
+                f"New winner: {payload['winner_user_id']} (prev: {payload.get('previous_winner_user_id')})"
+            )
+
+        await _run_and_answer(_runner)
+        return
+
+    await callback.answer()
 
 
 @router.callback_query(F.data.startswith("settings:"))
@@ -2361,6 +2677,55 @@ async def route_text(message: Message) -> None:
     typing_task = asyncio.create_task(_typing_loop(message.bot, chat_id, stop))
     try:
         async with lock:
+            cmd_wizard = await _cmd_wizard_get(chat_id)
+            if cmd_wizard:
+                step = str(cmd_wizard.get("step") or "").strip().lower()
+                if step == "dispatch_text":
+                    prefix = str(cmd_wizard.get("prefix") or "")
+                    await _cmd_wizard_clear(chat_id)
+                    typed = text.strip()
+                    if not typed:
+                        await message.answer("Send the requested details to continue.")
+                        return
+                    await _dispatch_command_text(message, f"{prefix}{typed}".strip())
+                    return
+                if step == "giveaway_prize":
+                    await _cmd_wizard_clear(chat_id)
+                    if not message.from_user:
+                        await message.answer("Could not identify sender.")
+                        return
+                    prize = text.strip().strip("'\"") or "Prize"
+                    duration_seconds = max(30, _as_int(cmd_wizard.get("duration_seconds"), 600))
+                    winners_requested = max(1, min(_as_int(cmd_wizard.get("winners"), 1), 5))
+                    try:
+                        payload = await hub.giveaway_service.start_giveaway(
+                            group_chat_id=chat_id,
+                            admin_chat_id=message.from_user.id,
+                            duration_seconds=duration_seconds,
+                            prize=prize,
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        await message.answer(str(exc))
+                        return
+                    note = ""
+                    if winners_requested > 1:
+                        note = "\nNote: multi-winner draw runs as sequential rerolls after first winner."
+                    await message.answer(
+                        f"Giveaway #{payload['id']} started.\nPrize: {payload['prize']}\n"
+                        f"Ends at: {payload['end_time']}\nUsers enter with /join or /giveaway join{note}",
+                        reply_markup=giveaway_menu(is_admin=True),
+                    )
+                    return
+                if step == "alert_clear_symbol":
+                    await _cmd_wizard_clear(chat_id)
+                    symbol = text.strip().upper().lstrip("$")
+                    if not re.fullmatch(r"[A-Z0-9]{2,20}", symbol):
+                        await message.answer("Invalid symbol. Send a ticker like SOL.")
+                        return
+                    count = await hub.alerts_service.delete_alerts_by_symbol(chat_id, symbol)
+                    await message.answer(f"Cleared {count} alerts for {symbol}.")
+                    return
+
             wizard = await _wizard_get(chat_id)
             if wizard:
                 step = wizard.get("step")
