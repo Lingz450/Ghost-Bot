@@ -10,7 +10,7 @@ import logging
 from aiogram import F, Router
 from aiogram.enums import ChatAction
 from aiogram.filters import Command
-from aiogram.types import BufferedInputFile, CallbackQuery, Message
+from aiogram.types import BufferedInputFile, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from app.bot.keyboards import (
     alert_quick_menu,
@@ -483,6 +483,29 @@ async def _send_fred_analysis(message: Message, symbol: str, text: str) -> None:
         await message.bot.send_chat_action(message.chat.id, ChatAction.TYPING)
     await asyncio.sleep(1.3)
     await message.answer(text, reply_markup=analysis_actions(symbol))
+
+
+def _define_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="DEFINE Analyze 1h", callback_data="define:analyze:1h"),
+                InlineKeyboardButton(text="DEFINE Analyze 4h", callback_data="define:analyze:4h"),
+            ],
+            [
+                InlineKeyboardButton(text="DEFINE Chart 1h", callback_data="define:chart:1h"),
+                InlineKeyboardButton(text="DEFINE Heatmap", callback_data="define:heatmap"),
+            ],
+            [
+                InlineKeyboardButton(text="DEFINE Set Alert", callback_data="define:alert"),
+                InlineKeyboardButton(text="Top Overbought 1h", callback_data="top:overbought:1h"),
+            ],
+            [
+                InlineKeyboardButton(text="Top Oversold 1h", callback_data="top:oversold:1h"),
+                InlineKeyboardButton(text="DEFINE News", callback_data="define:news"),
+            ],
+        ]
+    )
 
 
 def _mentions_bot(text: str, bot_username: str | None) -> bool:
@@ -2869,6 +2892,124 @@ async def quick_news_callback(callback: CallbackQuery) -> None:
     await _run_with_typing_lock(callback.bot, chat_id, _run)
 
 
+@router.callback_query(F.data.startswith("define:"))
+async def define_easter_egg_callback(callback: CallbackQuery) -> None:
+    if not await _acquire_callback_once(callback):
+        with suppress(Exception):
+            await callback.answer()
+        return
+
+    chat_id = callback.message.chat.id
+
+    async def _run() -> None:
+        hub = _require_hub()
+        settings = await hub.user_service.get_settings(chat_id)
+        parts = (callback.data or "").split(":")
+        action = parts[1] if len(parts) > 1 else ""
+
+        if action == "analyze":
+            timeframe = parts[2] if len(parts) > 2 else "1h"
+            symbol = "DEFINE"
+            payload = await hub.analysis_service.analyze(
+                symbol,
+                timeframe=timeframe,
+                timeframes=[timeframe],
+                ema_periods=_parse_int_list(settings.get("preferred_ema_periods", [20, 50, 200]), [20, 50, 200]),
+                rsi_periods=_parse_int_list(settings.get("preferred_rsi_periods", [14]), [14]),
+                include_derivatives=True,
+                include_news=True,
+            )
+            await hub.cache.set_json(f"last_analysis:{chat_id}:{symbol}", payload, ttl=1800)
+            await _remember_analysis_context(chat_id, symbol, payload.get("side"), payload)
+            analysis_text = await _render_analysis_text(
+                payload=payload,
+                symbol=symbol,
+                direction=payload.get("side"),
+                settings=settings,
+                chat_id=chat_id,
+            )
+            await _send_fred_analysis(callback.message, symbol, analysis_text)
+            await callback.answer()
+            return
+
+        if action == "chart":
+            timeframe = parts[2] if len(parts) > 2 else "1h"
+            try:
+                img, _ = await hub.chart_service.render_chart(symbol="DEFINE", timeframe=timeframe)
+            except Exception:  # noqa: BLE001
+                await callback.message.answer("Drop a real ticker for chart, e.g. `chart SOL 1h`.")
+                await callback.answer()
+                return
+            await callback.message.answer_photo(
+                BufferedInputFile(img, filename=f"DEFINE-{timeframe}.png"),
+                caption=f"DEFINE {timeframe} chart.",
+            )
+            await callback.answer()
+            return
+
+        if action == "heatmap":
+            symbol = "DEFINE"
+            try:
+                img, meta = await hub.orderbook_heatmap_service.render_heatmap(symbol=symbol)
+            except Exception:  # noqa: BLE001
+                symbol = "BTC"
+                img, meta = await hub.orderbook_heatmap_service.render_heatmap(symbol=symbol)
+            await callback.message.answer_photo(
+                BufferedInputFile(img, filename=f"{symbol}_heatmap.png"),
+                caption=(
+                    f"{meta['pair']} orderbook heatmap\n"
+                    f"Best bid: {meta['best_bid']:.6f} | Best ask: {meta['best_ask']:.6f}\n"
+                    f"Bid wall: {meta['bid_wall']:.6f} | Ask wall: {meta['ask_wall']:.6f}"
+                ),
+            )
+            await callback.answer()
+            return
+
+        if action == "alert":
+            await _set_pending_alert(chat_id, "DEFINE")
+            await callback.message.answer("Send alert level for DEFINE, e.g. DEFINE 0.50")
+            await callback.answer()
+            return
+
+        if action == "news":
+            payload = await hub.news_service.get_digest(topic="DEFINE", mode="crypto", limit=6)
+            await callback.message.answer(news_template(payload))
+            await callback.answer()
+            return
+
+        await callback.answer()
+
+    await _run_with_typing_lock(callback.bot, chat_id, _run)
+
+
+@router.callback_query(F.data.startswith("top:"))
+async def top_rsi_callback(callback: CallbackQuery) -> None:
+    if not await _acquire_callback_once(callback):
+        with suppress(Exception):
+            await callback.answer()
+        return
+
+    chat_id = callback.message.chat.id
+
+    async def _run() -> None:
+        hub = _require_hub()
+        parts = (callback.data or "").split(":")
+        mode = parts[1] if len(parts) > 1 else "oversold"
+        timeframe = parts[2] if len(parts) > 2 else "1h"
+        mode = "overbought" if mode == "overbought" else "oversold"
+        payload = await hub.rsi_scanner_service.scan(
+            timeframe=timeframe,
+            mode=mode,
+            limit=10,
+            rsi_length=14,
+            symbol=None,
+        )
+        await callback.message.answer(rsi_scan_template(payload))
+        await callback.answer()
+
+    await _run_with_typing_lock(callback.bot, chat_id, _run)
+
+
 @router.message(F.text)
 async def route_text(message: Message) -> None:
     hub = _require_hub()
@@ -3065,6 +3206,32 @@ async def route_text(message: Message) -> None:
                     return
 
             settings = await hub.user_service.get_settings(chat_id)
+            text_lower = text.lower().strip()
+
+            # Special Fred Easter eggs / overrides
+            if "define trading" in text_lower or ("define" in text_lower and len(text_lower.split()) <= 3):
+                await message.bot.send_chat_action(message.chat.id, ChatAction.TYPING)
+                await asyncio.sleep(0.8)
+
+                funny_line = (
+                    "the art of losing money faster than a casino while staring at candles "
+                    "until your eyes bleed. buy low, sell high, don't get rekt"
+                )
+                await message.answer(funny_line, reply_markup=_define_keyboard())
+                return
+
+            # Bonus: catch casual scanner phrases and route directly.
+            if "rsi top" in text_lower or "overbought list" in text_lower or "strong coins" in text_lower:
+                if "oversold" in text_lower:
+                    await _dispatch_command_text(message, "rsi top 10 1h oversold")
+                elif "overbought" in text_lower:
+                    await _dispatch_command_text(message, "rsi top 10 1h overbought")
+                elif "rsi top" in text_lower:
+                    await _dispatch_command_text(message, text_lower)
+                else:
+                    await _dispatch_command_text(message, "coins to watch 5")
+                return
+
             followup_context = await _recent_analysis_context(chat_id)
             if _looks_like_analysis_followup(text, followup_context):
                 followup_reply = await _llm_followup_reply(
