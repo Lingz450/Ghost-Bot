@@ -730,8 +730,7 @@ _BOT_META_RE = re.compile(
 
 
 def _looks_like_market_question(text: str) -> bool:
-    words = re.findall(r"\w+", text.lower())
-    if len(words) < 2:
+    if not text.strip():
         return False
     # Bot-meta questions must never be routed to the market chat handler
     if _BOT_META_RE.search(text):
@@ -3448,6 +3447,38 @@ async def route_text(message: Message) -> None:
 
     if not await _check_req_limit(chat_id):
         await message.answer("Rate limit hit. Try again in a minute.")
+        return
+
+    # Fast-path: pure greetings — respond immediately, no LLM or market data needed.
+    # This avoids cold-start timeouts and lock contention for short casual messages.
+    _GREETING_RE = re.compile(
+        r"^(gm|gn|gg|gm fren|gn fren|good\s*morning|good\s*night|"
+        r"hi|hey|hello|sup|yo|wassup|wagmi|lgtm|lfg|ngmi|ser|fren|anon|"
+        r"wen\s*moon|wen\s*lambo|wen\s*pump|wen\s*bull|wen\s*dump|"
+        r"still\s*alive|you\s*there|you\s*alive|are\s*you\s*there)[\s!?.]*$",
+        re.IGNORECASE,
+    )
+    if _GREETING_RE.match(raw_text.strip()):
+        import random
+        _gm_replies = [
+            "gm fren 👋 charts are open, tape is moving. what are we hunting today?",
+            "gm anon ☀️ market's breathing. drop a ticker or ask anything.",
+            "gm 👋 still alive, still watching. what do you need?",
+            "gm fren — locked in. throw me a coin or question.",
+            "gm anon. BTC still the anchor, alts still lagging dominance. what's the play?",
+            "gm ☕ fresh session. give me a ticker, a question, or ask what's moving.",
+            "gm — charts loaded, alerts armed. what are we doing today?",
+        ]
+        _gn_replies = [
+            "gn fren 🌙 set your alerts before you sleep.",
+            "gn anon. the market doesn't sleep but you should.",
+            "gn — if you haven't set alerts, do it now.",
+        ]
+        low = raw_text.strip().lower()
+        if low.startswith("gn") or "night" in low:
+            await message.answer(random.choice(_gn_replies))
+        else:
+            await message.answer(random.choice(_gm_replies))
         return
 
     lock = _chat_lock(chat_id)
