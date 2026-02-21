@@ -7,13 +7,13 @@ from typing import Any
 from litellm import acompletion
 
 
-class FredPersona:
+class GhostPersona:
     def __init__(self) -> None:
         self.claude_key = os.getenv("ANTHROPIC_API_KEY")
         self.grok_key = os.getenv("XAI_API_KEY")
         self.enabled = bool(self.claude_key or self.grok_key)
 
-    SYSTEM_PROMPT = """You are Fred — a savage, sharp crypto trader who calls everyone "fren" and "anon".
+    SYSTEM_PROMPT = """You are Ghost — a savage, sharp crypto trader who calls everyone "fren" and "anon".
 You are the ghost in the machine. You've seen every cycle, you read order flow like a book, and you have no patience for bad setups.
 
 HOW YOU WRITE (mandatory — study these examples):
@@ -62,19 +62,19 @@ STRICT FORMAT RULES:
 - Include macro context if the analysis payload has news: PCE data, Fed minutes, geopolitical events — weave into narrative
 - End with one sharp warning or observation. No "Not financial advice."
 - For directional questions without OHLCV data, give a short sharp opinion in 2-3 sentences. No rigid format.
-- For definition questions ("what is tp"), answer clearly in 1-2 sentences, Fred voice.
+- For definition questions ("what is tp"), answer clearly in 1-2 sentences, Ghost voice.
 - For casual questions, dry wit in 1 sentence.
 - NEVER use Telegram HTML tags like <b> or <i> in your response. Plain text only.
 - NEVER use "**" asterisks for bold. Plain text.
 - All lowercase preferred (like the examples). You're texting, not writing a report.
 """
 
-    async def format_as_fred(self, raw_data: dict[str, Any]) -> str:
+    async def format_as_ghost(self, raw_data: dict[str, Any]) -> str:
         if not self.enabled:
-            raise RuntimeError("Fred persona disabled: no API key configured")
+            raise RuntimeError("Ghost persona disabled: no API key configured")
 
         user_message = (
-            "Convert this analysis data into Fred's response style. "
+            "Convert this analysis data into Ghost's response style. "
             "Use the actual numbers from the data. Be specific about levels, RSI values, EMA positions. "
             "Match the examples exactly in tone and structure.\n\n"
             f"Analysis data:\n{json.dumps(raw_data, indent=2, default=str)}"
@@ -96,7 +96,7 @@ STRICT FORMAT RULES:
                 )
                 return response.choices[0].message.content.strip()
             except Exception as e:
-                print(f"Claude fred failed ({e}), trying Grok...")
+                print(f"Claude ghost failed ({e}), trying Grok...")
 
         # Fallback to Grok
         if self.grok_key:
@@ -115,10 +115,16 @@ STRICT FORMAT RULES:
                 )
                 return response.choices[0].message.content.strip()
             except Exception as e:
-                print(f"Both LLMs failed for fred: {e}")
+                print(f"Both LLMs failed for ghost: {e}")
 
-        raise RuntimeError("All LLMs failed for fred persona")
+        raise RuntimeError("All LLMs failed for ghost persona")
+
+    # Keep backward-compat alias
+    async def format_as_fred(self, raw_data: dict[str, Any]) -> str:
+        return await self.format_as_ghost(raw_data)
 
 
 # Singleton
-fred = FredPersona()
+ghost = GhostPersona()
+# backward-compat alias
+fred = ghost

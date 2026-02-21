@@ -491,7 +491,7 @@ async def _llm_analysis_reply(
         f"Analysis data for {symbol.upper()} ({direction_label} bias):\n"
         f"{json.dumps(payload, ensure_ascii=True, default=str)}\n\n"
         f"BTC/market backdrop: {market_context_text or 'not available'}\n\n"
-        "Write this as Fred would — start with current price and % change, weave in key levels "
+        "Write this as Ghost would — start with current price and % change, weave in key levels "
         "(EMA200, order blocks, bollinger bands, RSI) naturally in prose, mention macro if relevant, "
         "then give entry range / 3 targets / stop as simple plain lines. "
         "End with one sharp observation. All lowercase, casual trader voice. No HTML tags."
@@ -557,7 +557,7 @@ async def _render_analysis_text(
     detailed: bool = False,
 ) -> str:
     try:
-        return await fred.format_as_fred(payload)
+        return await fred.format_as_ghost(payload)
     except Exception:  # noqa: BLE001
         llm_text = await _llm_analysis_reply(
             payload=payload,
@@ -570,7 +570,7 @@ async def _render_analysis_text(
         return trade_plan_template(payload, settings, detailed=detailed)
 
 
-async def _send_fred_analysis(message: Message, symbol: str, text: str) -> None:
+async def _send_ghost_analysis(message: Message, symbol: str, text: str) -> None:
     with suppress(Exception):
         await message.bot.send_chat_action(message.chat.id, ChatAction.TYPING)
     await asyncio.sleep(1.3)
@@ -1102,7 +1102,7 @@ async def _handle_routed_intent(message: Message, settings: dict, route: dict) -
             settings=settings,
             chat_id=chat_id,
         )
-        await _send_fred_analysis(message, symbol, analysis_text)
+        await _send_ghost_analysis(message, symbol, analysis_text)
         return True
 
     if intent == "rsi_scan":
@@ -1587,7 +1587,7 @@ async def _handle_parsed_intent(message: Message, parsed, settings: dict) -> boo
             settings=settings,
             chat_id=chat_id,
         )
-        await _send_fred_analysis(message, symbol, analysis_text)
+        await _send_ghost_analysis(message, symbol, analysis_text)
         return True
 
     if parsed.intent == Intent.SETUP_REVIEW:
@@ -1985,7 +1985,7 @@ async def start_cmd(message: Message) -> None:
     name = message.from_user.first_name if message.from_user else "fren"
     await message.answer(
         f"gm <b>{name}</b> 👋\n\n"
-        "i'm <b>fred</b> — your on-chain trading assistant. i live in the market 24/7 so you don't have to.\n\n"
+        "i'm <b>ghost</b> — your on-chain trading assistant. i live in the market 24/7 so you don't have to.\n\n"
         "try something like:\n"
         "· <code>BTC 4h</code> — full technical analysis\n"
         "· <code>ping me when ETH hits 2000</code> — price alert\n"
@@ -2944,7 +2944,7 @@ async def refresh_callback(callback: CallbackQuery) -> None:
             settings=settings,
             chat_id=chat_id,
         )
-        await _send_fred_analysis(callback.message, symbol, analysis_text)
+        await _send_ghost_analysis(callback.message, symbol, analysis_text)
         await callback.answer("Refreshed")
 
     await _run_with_typing_lock(callback.bot, chat_id, _run)
@@ -2987,7 +2987,7 @@ async def details_callback(callback: CallbackQuery) -> None:
             chat_id=chat_id,
             detailed=True,
         )
-        await _send_fred_analysis(callback.message, symbol, analysis_text)
+        await _send_ghost_analysis(callback.message, symbol, analysis_text)
         await callback.answer("Detailed mode")
 
     await _run_with_typing_lock(callback.bot, chat_id, _run)
@@ -3135,7 +3135,7 @@ async def quick_analysis_callback(callback: CallbackQuery) -> None:
             settings=settings,
             chat_id=chat_id,
         )
-        await _send_fred_analysis(callback.message, symbol, analysis_text)
+        await _send_ghost_analysis(callback.message, symbol, analysis_text)
         await callback.answer()
 
     await _run_with_typing_lock(callback.bot, chat_id, _run)
@@ -3172,7 +3172,7 @@ async def quick_analysis_tf_callback(callback: CallbackQuery) -> None:
             settings=settings,
             chat_id=chat_id,
         )
-        await _send_fred_analysis(callback.message, symbol.upper(), analysis_text)
+        await _send_ghost_analysis(callback.message, symbol.upper(), analysis_text)
         await callback.answer()
 
     await _run_with_typing_lock(callback.bot, chat_id, _run)
@@ -3305,7 +3305,7 @@ async def define_easter_egg_callback(callback: CallbackQuery) -> None:
                 settings=settings,
                 chat_id=chat_id,
             )
-            await _send_fred_analysis(callback.message, symbol, analysis_text)
+            await _send_ghost_analysis(callback.message, symbol, analysis_text)
             await callback.answer()
             return
 
@@ -3618,7 +3618,7 @@ async def route_text(message: Message) -> None:
             settings = await hub.user_service.get_settings(chat_id)
             text_lower = text.lower().strip()
 
-            # Special Fred Easter eggs / overrides
+            # Special Ghost Easter eggs / overrides
             if "define trading" in text_lower or ("define" in text_lower and len(text_lower.split()) <= 3):
                 await message.bot.send_chat_action(message.chat.id, ChatAction.TYPING)
                 await asyncio.sleep(0.8)

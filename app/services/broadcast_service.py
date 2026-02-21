@@ -20,7 +20,7 @@ class BroadcastService:
     - Volume spikes (>2x average)
     - Significant price moves (>3% in 1h)
 
-    If any condition triggers, generate a Fred-style market commentary
+    If any condition triggers, generate a Ghost-style market commentary
     and send to configured broadcast channel(s).
 
     Rate limit: max 1 broadcast per hour to avoid spam.

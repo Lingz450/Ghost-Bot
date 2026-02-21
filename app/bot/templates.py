@@ -375,61 +375,79 @@ def _fmt_price(v: object) -> str:
 
 
 def setup_review_template(payload: dict, settings: dict) -> str:
-    tone = _tone_mode(settings)
+    tone      = _tone_mode(settings)
     symbol    = safe_html(str(payload.get("symbol", "")))
     direction = safe_html(str(payload.get("direction", "")))
     verdict   = safe_html(str(payload.get("verdict", "")).upper())
     tf        = safe_html(str(payload.get("timeframe", "1h")))
 
-    if tone == "wild":
-        opener = "i see the level. here's where it breaks."
-    elif tone == "standard":
-        opener = "Setup review complete."
+    entry_val = _fmt_price(payload.get("entry", ""))
+    stop_val  = _fmt_price(payload.get("stop", ""))
+    targets   = payload.get("targets", [])
+    rr_first  = float(payload.get("rr_first", 0) or 0)
+    rr_best   = float(payload.get("rr_best", 0) or 0)
+    stop_atr  = float(payload.get("stop_atr", 0) or 0)
+    entry_ctx = safe_html(str(payload.get("entry_context", "")))
+    stop_note = safe_html(str(payload.get("stop_note", "")))
+    support   = payload.get("support")
+    resistance = payload.get("resistance")
+
+    # --- Opinionated one-liner about the setup ---
+    if rr_first < 1.0:
+        rr_comment = f"<b>your first TP gives sub-1:1 R/R ({rr_first:.2f}R) — that's a bad trade.</b> move it out or don't take it."
+    elif rr_first < 1.5:
+        rr_comment = f"first TP is marginal at {rr_first:.2f}R. acceptable if you partial and trail, but don't hold the whole bag."
     else:
-        opener = "Setup review completed."
+        rr_comment = f"solid {rr_first:.2f}R to first target — this setup pays."
 
-    entry_val  = _fmt_price(payload.get("entry", ""))
-    stop_val   = _fmt_price(payload.get("stop", ""))
-    targets    = payload.get("targets", [])
-    rr_first   = safe_html(str(payload.get("rr_first", "")))
-    rr_best    = safe_html(str(payload.get("rr_best", "")))
-    stop_atr   = safe_html(str(payload.get("stop_atr", "")))
-    entry_ctx  = safe_html(str(payload.get("entry_context", "")))
-    stop_note  = safe_html(str(payload.get("stop_note", "")))
-    risk_line  = safe_html(str(payload.get("risk_line", "")))
-
-    # Build targets line with TP labels
-    target_lines: list[str] = []
-    for i, t in enumerate(targets, 1):
-        target_lines.append(f"tp{i}: <b>${safe_html(_fmt_price(t))}</b>")
+    if stop_atr < 0.8:
+        stop_comment = f"stop is dangerously tight ({stop_atr:.2f} ATR) — market noise will hunt it."
+    elif stop_atr > 4.0:
+        stop_comment = f"stop is very wide ({stop_atr:.2f} ATR) — you're risking a lot of capital."
+    else:
+        stop_comment = ""
 
     sug = payload.get("suggested", {})
 
     def _sug_line(key: str, label: str) -> str:
-        val  = _fmt_price(sug.get(key, ""))
-        why  = safe_html(str(sug.get(f"{key}_why", "")))
+        val = _fmt_price(sug.get(key, ""))
+        why = safe_html(str(sug.get(f"{key}_why", "")))
         if why:
             return f"  {label}:  <b>${val}</b>  <i>({why})</i>"
         return f"  {label}:  <b>${val}</b>"
 
     lines = [
         f"<b>{symbol} {direction} — {verdict}</b>",
-        f"<i>{opener}</i>",
         "",
         f"entry:  <b>${safe_html(entry_val)}</b>",
         f"stop:   <b>${safe_html(stop_val)}</b>",
     ]
-    for tl in target_lines:
-        lines.append(tl)
+    for i, t in enumerate(targets, 1):
+        lines.append(f"tp{i}:   <b>${safe_html(_fmt_price(t))}</b>")
 
     lines += [
         "",
-        f"R/R:  first <b>{rr_first}R</b>  ·  best <b>{rr_best}R</b>",
-        f"ATR ({tf}):  {stop_atr}",
+        f"R/R:  first <b>{rr_first:.2f}R</b>  ·  best <b>{rr_best:.2f}R</b>",
+        f"ATR ({tf}):  {stop_atr:.2f}",
         f"<i>{entry_ctx}</i>",
-        f"<i>{stop_note}</i>",
+    ]
+    if stop_comment:
+        lines.append(f"<i>{stop_comment}</i>")
+
+    lines += [
         "",
-        "<b>fred's levels:</b>",
+        f"<b>ghost's take:</b>  {rr_comment}",
+    ]
+
+    # Key levels context
+    if support and resistance:
+        lines.append(
+            f"support <b>${safe_html(_fmt_price(support))}</b>  ·  resistance <b>${safe_html(_fmt_price(resistance))}</b>"
+        )
+
+    lines += [
+        "",
+        "<b>ghost's levels:</b>",
         _sug_line("entry", "entry"),
         _sug_line("stop",  "sl"),
         _sug_line("tp1",   "tp1"),
@@ -441,7 +459,7 @@ def setup_review_template(payload: dict, settings: dict) -> str:
         lines += [
             "",
             "<b>position sizing:</b>",
-            f"  margin:    <b>${safe_html(str(position.get('margin_usd', '')))}",
+            f"  margin:    <b>${safe_html(str(position.get('margin_usd', '')))}</b>",
             f"  leverage:  <b>{safe_html(str(position.get('leverage', '')))}x</b>",
             f"  notional:  <b>${safe_html(str(position.get('notional_usd', '')))}</b>",
             f"  qty:       {safe_html(str(position.get('qty', '')))}",
@@ -457,7 +475,7 @@ def setup_review_template(payload: dict, settings: dict) -> str:
     if size_note:
         lines += ["", f"<i>{size_note}</i>"]
 
-    lines += ["", f"<i>{risk_line}</i>"]
+    lines += ["", "<i>use as a risk-planning map — execute only if structure still holds</i>"]
 
     if tone == "wild":
         lines.append(_pick(WILD_CLOSERS))
