@@ -1669,13 +1669,18 @@ async def _handle_parsed_intent(message: Message, parsed, settings: dict) -> boo
         return True
 
     if parsed.intent == Intent.RSI_SCAN:
-        payload = await hub.rsi_scanner_service.scan(
-            timeframe=parsed.entities.get("timeframe", "1h"),
-            mode=parsed.entities.get("mode", "oversold"),
-            limit=int(parsed.entities.get("limit", 10)),
-            rsi_length=int(parsed.entities.get("rsi_length", 14)),
-            symbol=parsed.entities.get("symbol"),
-        )
+        try:
+            payload = await hub.rsi_scanner_service.scan(
+                timeframe=parsed.entities.get("timeframe", "1h"),
+                mode=parsed.entities.get("mode", "oversold"),
+                limit=int(parsed.entities.get("limit", 10)),
+                rsi_length=int(parsed.entities.get("rsi_length", 14)),
+                symbol=parsed.entities.get("symbol"),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("rsi_scan_intent_failed", extra={"event": "rsi_intent_error", "error": str(exc)})
+            await message.answer("RSI scan hit an error — try again in a moment.")
+            return True
         await _remember_source_context(
             chat_id,
             source_line=str(payload.get("source_line") or ""),
@@ -2637,7 +2642,28 @@ async def command_menu_callback(callback: CallbackQuery) -> None:
             await callback.answer()
             return
         if len(parts) >= 6:
-            await _dispatch_with_typing(f"rsi top {parts[4]} {parts[2]} {parts[3]} rsi{parts[5]}")
+            _rsi_tf = parts[2]
+            _rsi_mode = "overbought" if parts[3] == "overbought" else "oversold"
+            _rsi_limit = max(1, min(_as_int(parts[4], 10), 20))
+            _rsi_len = max(2, min(_as_int(parts[5], 14), 50))
+
+            async def _run_rsi() -> None:
+                try:
+                    payload = await hub.rsi_scanner_service.scan(
+                        timeframe=_rsi_tf,
+                        mode=_rsi_mode,
+                        limit=_rsi_limit,
+                        rsi_length=_rsi_len,
+                        symbol=None,
+                    )
+                    await callback.message.answer(rsi_scan_template(payload))
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("rsi_scan_button_failed", extra={"event": "rsi_button_error", "error": str(exc)})
+                    await callback.message.answer("RSI scan hit an error — try again in a moment.")
+                with suppress(Exception):
+                    await callback.answer()
+
+            await _run_with_typing_lock(callback.bot, chat_id, _run_rsi)
             return
     if action == "ema":
         if len(parts) >= 3 and parts[2] == "custom":

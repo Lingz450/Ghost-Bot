@@ -146,11 +146,11 @@ class RSIScannerService:
         if not ranked:
             return {
                 "symbols": 0,
-                "updated_at": datetime.now(timezone.utc).isoformat(),
+                "updated_at": datetime.utcnow().isoformat(),
                 "skipped": True,
                 "reason": "universe_unavailable",
             }
-        now = datetime.now(timezone.utc)
+        now = datetime.utcnow()
         rows = []
         for idx, row in enumerate(ranked, start=1):
             rows.append(
@@ -169,7 +169,7 @@ class RSIScannerService:
                 await session.execute(insert(UniverseSymbol).values(rows))
             await session.commit()
 
-        return {"symbols": len(rows), "updated_at": now.isoformat()}
+        return {"symbols": len(rows), "updated_at": now.isoformat() + "Z"}
 
     async def _universe_symbols(self, limit: int | None = None) -> list[str]:
         cap = max(20, min(int(limit or self.universe_size), 1000))
@@ -240,7 +240,7 @@ class RSIScannerService:
             "ema50": float(ema(close, 50).iloc[-1]),
             "ema100": float(ema(close, 100).iloc[-1]),
             "ema200": float(ema(close, 200).iloc[-1]),
-            "computed_at": datetime.now(timezone.utc),
+            "computed_at": datetime.utcnow(),
         }
 
     async def _upsert_snapshots(self, rows: list[dict]) -> int:
@@ -290,11 +290,11 @@ class RSIScannerService:
             due = set(self._due_timeframes())
             tfs = [tf for tf in tfs if tf in due]
         if not tfs:
-            return {"updated": 0, "timeframes": [], "symbols": 0, "updated_at": datetime.now(timezone.utc).isoformat()}
+            return {"updated": 0, "timeframes": [], "symbols": 0, "updated_at": datetime.utcnow().isoformat() + "Z"}
 
         symbols = await self._universe_symbols(limit=universe_size or self.universe_size)
         if not symbols:
-            return {"updated": 0, "timeframes": tfs, "symbols": 0, "updated_at": datetime.now(timezone.utc).isoformat()}
+            return {"updated": 0, "timeframes": tfs, "symbols": 0, "updated_at": datetime.utcnow().isoformat() + "Z"}
 
         total_rows = 0
         semaphore = asyncio.Semaphore(self.concurrency)
@@ -312,11 +312,11 @@ class RSIScannerService:
             "updated": total_rows,
             "timeframes": tfs,
             "symbols": len(symbols),
-            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.utcnow().isoformat() + "Z",
         }
 
     async def _query_precomputed(self, timeframe: str, mode: str, limit: int) -> list[dict]:
-        freshness_cutoff = datetime.now(timezone.utc) - timedelta(minutes=self.freshness_minutes)
+        freshness_cutoff = datetime.utcnow() - timedelta(minutes=self.freshness_minutes)
         async with self.db_factory() as session:
             query = await session.execute(
                 select(
@@ -394,7 +394,11 @@ class RSIScannerService:
         else:
             items = []
             if rsi_length == 14 and tf in self.scan_timeframes:
-                items = await self._query_precomputed(tf, mode_norm, cap)
+                try:
+                    items = await self._query_precomputed(tf, mode_norm, cap)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("rsi_precomputed_query_failed", extra={"event": "rsi_query_error", "error": str(exc)})
+                    items = []
                 if len(items) < max(3, cap // 2):
                     try:
                         await self.refresh_universe(self.universe_size)
@@ -404,7 +408,11 @@ class RSIScannerService:
                             "rsi_precompute_refresh_failed",
                             extra={"event": "rsi_refresh_fallback", "timeframe": tf, "error": str(exc)},
                         )
-                    items = await self._query_precomputed(tf, mode_norm, cap)
+                    try:
+                        items = await self._query_precomputed(tf, mode_norm, cap)
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning("rsi_precomputed_retry_failed", extra={"event": "rsi_query_error", "error": str(exc)})
+                        items = []
             if not items:
                 items = await self._scan_live_universe(tf, mode_norm, cap, rsi_length)
                 source = "live_fallback"
@@ -433,5 +441,5 @@ class RSIScannerService:
             "rsi_length": rsi_length,
             "items": ranked,
             "source_line": source_line,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.utcnow().isoformat() + "Z",
         }
