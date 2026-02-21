@@ -24,13 +24,22 @@ SMALLTALK_REPLIES = [
 ]
 
 WILD_CLOSERS = [
-    "Drop the next ticker and I'll map it fast.",
-    "Want me to set the alert level now?",
-    "Keep it clean. One setup at a time.",
+    "drop the next ticker and i'll map it fast.",
+    "want me to set the alert level now?",
+    "keep it clean. one setup at a time.",
+    "send the next chart if structure changes.",
+    "if btc flips, reassess everything.",
+    "stop is non-negotiable. don't move it.",
+    "size it right — the best trade means nothing if you're overleveraged.",
+    "partial out at tp1 and let the rest run.",
+    "if it doesn't set up clean, skip it. there's always another trade.",
 ]
 
 STANDARD_CLOSERS = [
-    "Send the next chart if you want a second read.",
+    "send the next chart if you want a second read.",
+    "set the alert and let the market come to you.",
+    "size correctly and manage the trade — that's the edge.",
+    "re-evaluate if macro conditions change.",
 ]
 
 UNKNOWN_FOLLOWUPS = [

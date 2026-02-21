@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import random
 import re
 from contextlib import suppress
 from datetime import datetime, timezone
@@ -56,7 +57,7 @@ from app.bot.templates import (
 )
 from app.core.config import get_settings
 from app.core.container import ServiceHub
-from app.core.fred_persona import fred
+from app.core.fred_persona import ghost as fred
 from app.services.market_context import format_market_context
 from app.core.nlu import COMMON_WORDS_NOT_TICKERS, Intent, is_likely_english_phrase, parse_message, parse_timestamp
 from app.db.models import TradeCheck
@@ -72,6 +73,32 @@ SOURCE_QUERY_RE = re.compile(
     r"\b(where\s+is\s+this\s+from|what(?:'s| is)\s+the\s+source|which\s+exchange|source\??|exchange\??)\b",
     re.IGNORECASE,
 )
+
+# Greeting fast-path — compiled once at import time
+_GREETING_RE = re.compile(
+    r"^(gm|gn|gg|gm fren|gn fren|good\s*morning|good\s*night|"
+    r"hi|hey|hello|sup|yo|wassup|wagmi|lgtm|lfg|ngmi|ser|fren|anon|"
+    r"wen\s*moon|wen\s*lambo|wen\s*pump|wen\s*bull|wen\s*dump|"
+    r"still\s*alive|you\s*there|you\s*alive|are\s*you\s*there)[\s!?.]*$",
+    re.IGNORECASE,
+)
+_GM_REPLIES = [
+    "gm fren 👋 charts are open, tape is moving. what are we hunting today?",
+    "gm anon ☀️ market's breathing. drop a ticker or ask anything.",
+    "gm 👋 still alive, still watching. what do you need?",
+    "gm fren — locked in. throw me a coin or question.",
+    "gm anon. BTC still the anchor, alts still lagging dominance. what's the play?",
+    "gm ☕ fresh session. give me a ticker, a question, or ask what's moving.",
+    "gm — charts loaded, alerts armed. what are we doing today?",
+    "gm fren. the market doesn't care about your feelings. let's get to work.",
+    "gm anon 🌅 new candle, new opportunity. what's on the radar?",
+]
+_GN_REPLIES = [
+    "gn fren 🌙 set your alerts before you sleep.",
+    "gn anon. the market doesn't sleep but you should.",
+    "gn — if you haven't set alerts, do it now. i'll watch.",
+    "gn fren 🌙 tape keeps printing while you rest. alerts are armed.",
+]
 SOURCE_QUERY_STOPWORDS = {
     "source",
     "exchange",
@@ -581,20 +608,20 @@ def _define_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="DEFINE Analyze 1h", callback_data="define:analyze:1h"),
-                InlineKeyboardButton(text="DEFINE Analyze 4h", callback_data="define:analyze:4h"),
+                InlineKeyboardButton(text="Analyze 1h", callback_data="define:analyze:1h"),
+                InlineKeyboardButton(text="Analyze 4h", callback_data="define:analyze:4h"),
             ],
             [
-                InlineKeyboardButton(text="DEFINE Chart 1h", callback_data="define:chart:1h"),
-                InlineKeyboardButton(text="DEFINE Heatmap", callback_data="define:heatmap"),
+                InlineKeyboardButton(text="Chart 1h", callback_data="define:chart:1h"),
+                InlineKeyboardButton(text="Heatmap", callback_data="define:heatmap"),
             ],
             [
-                InlineKeyboardButton(text="DEFINE Set Alert", callback_data="define:alert"),
+                InlineKeyboardButton(text="Set Alert", callback_data="define:alert"),
                 InlineKeyboardButton(text="Top Overbought 1h", callback_data="top:overbought:1h"),
             ],
             [
                 InlineKeyboardButton(text="Top Oversold 1h", callback_data="top:oversold:1h"),
-                InlineKeyboardButton(text="DEFINE News", callback_data="define:news"),
+                InlineKeyboardButton(text="Latest News", callback_data="define:news"),
             ],
         ]
     )
@@ -816,7 +843,7 @@ async def _llm_market_chat_reply(
         reply = await hub.llm_client.reply(
             prompt,
             history=history,
-            max_output_tokens=min(max(int(_settings.openai_max_output_tokens), 500), 800),
+            max_output_tokens=min(max(int(_settings.openai_max_output_tokens), 600), 1000),
             temperature=max(0.5, float(_settings.openai_temperature)),
         )
     except Exception:  # noqa: BLE001
@@ -3446,46 +3473,23 @@ async def route_text(message: Message) -> None:
         return
 
     if not await _check_req_limit(chat_id):
-        await message.answer("Rate limit hit. Try again in a minute.")
+        await message.answer("slow down fren — rate limit hit. give it a minute.")
         return
 
-    # Fast-path: pure greetings — respond immediately, no LLM or market data needed.
-    # This avoids cold-start timeouts and lock contention for short casual messages.
-    _GREETING_RE = re.compile(
-        r"^(gm|gn|gg|gm fren|gn fren|good\s*morning|good\s*night|"
-        r"hi|hey|hello|sup|yo|wassup|wagmi|lgtm|lfg|ngmi|ser|fren|anon|"
-        r"wen\s*moon|wen\s*lambo|wen\s*pump|wen\s*bull|wen\s*dump|"
-        r"still\s*alive|you\s*there|you\s*alive|are\s*you\s*there)[\s!?.]*$",
-        re.IGNORECASE,
-    )
+    # Fast-path: pure greetings — respond immediately without LLM or market data.
     if _GREETING_RE.match(raw_text.strip()):
-        import random
-        _gm_replies = [
-            "gm fren 👋 charts are open, tape is moving. what are we hunting today?",
-            "gm anon ☀️ market's breathing. drop a ticker or ask anything.",
-            "gm 👋 still alive, still watching. what do you need?",
-            "gm fren — locked in. throw me a coin or question.",
-            "gm anon. BTC still the anchor, alts still lagging dominance. what's the play?",
-            "gm ☕ fresh session. give me a ticker, a question, or ask what's moving.",
-            "gm — charts loaded, alerts armed. what are we doing today?",
-        ]
-        _gn_replies = [
-            "gn fren 🌙 set your alerts before you sleep.",
-            "gn anon. the market doesn't sleep but you should.",
-            "gn — if you haven't set alerts, do it now.",
-        ]
         low = raw_text.strip().lower()
         if low.startswith("gn") or "night" in low:
-            await message.answer(random.choice(_gn_replies))
+            await message.answer(random.choice(_GN_REPLIES))
         else:
-            await message.answer(random.choice(_gm_replies))
+            await message.answer(random.choice(_GM_REPLIES))
         return
 
     lock = _chat_lock(chat_id)
     if lock.locked():
         # Avoid flooding busy notices if user sends many messages quickly.
         if await hub.cache.set_if_absent(f"busy_notice:{chat_id}", ttl=5):
-            await message.answer("Still processing your previous request. Give me a few seconds.")
+            await message.answer("still on it fren — give me a few seconds.")
         return
 
     start_ts = datetime.now(timezone.utc)
@@ -3501,7 +3505,7 @@ async def route_text(message: Message) -> None:
                     await _cmd_wizard_clear(chat_id)
                     typed = text.strip()
                     if not typed:
-                        await message.answer("Send the requested details to continue.")
+                        await message.answer("send the details and i'll run it.")
                         return
                     await _dispatch_command_text(message, f"{prefix}{typed}".strip())
                     return
@@ -3661,7 +3665,7 @@ async def route_text(message: Message) -> None:
                 if llm_reply:
                     await _send_llm_reply(message, llm_reply)
                     return
-                await message.answer("signal unclear right now. try again in a sec.")
+                await message.answer("signal unclear fren — try rephrasing or drop a ticker.")
                 return
 
             if hub.llm_client and chat_mode == "llm_first":
